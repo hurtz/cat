@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """WebSocket relay server for multiplayer terminal pets."""
 
-import asyncio, json, time, os
+import asyncio, json, time, os, http
 from websockets.asyncio.server import serve
 
 ROOMS = {}  # room_name -> {client_id: {"ws": ws, "state": {...}, "last_seen": time}}
@@ -107,10 +107,14 @@ async def cleanup_stale():
                 del ROOMS[room]
 
 
+async def health_check(connection, request):
+    if request.path == "/health":
+        return connection.respond(http.HTTPStatus.OK, "meow\n")
+
 async def main():
     port = int(os.environ.get("PORT", 8765))
     asyncio.create_task(cleanup_stale())
-    async with serve(handler, "0.0.0.0", port):
+    async with serve(handler, "0.0.0.0", port, process_request=health_check):
         print(f"pet relay server running on :{port}")
         await asyncio.Future()  # run forever
 
