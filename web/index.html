@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>cat</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0f;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    cursor: none;
+  }
+  canvas { display: block; }
+  #join-screen {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    z-index: 10;
+    background: #0a0a0f;
+    transition: opacity 0.5s;
+  }
+  #join-screen.hidden { opacity: 0; pointer-events: none; }
+  #join-screen h1 {
+    font-size: 3rem; color: #fff;
+    margin-bottom: 0.5rem;
+    font-family: 'Courier New', monospace;
+  }
+  #join-screen .ascii-hero {
+    color: #888; font-size: 1.5rem;
+    line-height: 1.2; margin-bottom: 2rem;
+    white-space: pre;
+  }
+  #join-screen input {
+    background: #1a1a2e; border: 2px solid #333;
+    color: #fff; font-size: 1.3rem; padding: 0.7rem 1.2rem;
+    border-radius: 8px; width: 260px; text-align: center;
+    font-family: 'Courier New', monospace;
+    outline: none; transition: border-color 0.2s;
+  }
+  #join-screen input:focus { border-color: #7c6fff; }
+  #join-screen input::placeholder { color: #555; }
+  #join-screen button {
+    margin-top: 1rem; padding: 0.7rem 2.5rem;
+    background: #7c6fff; color: #fff; border: none;
+    border-radius: 8px; font-size: 1.2rem; cursor: pointer;
+    font-family: 'Courier New', monospace;
+    transition: background 0.2s, transform 0.1s;
+  }
+  #join-screen button:hover { background: #6a5aef; transform: scale(1.05); }
+  #join-screen .room-info {
+    color: #555; font-size: 0.85rem; margin-top: 1.5rem;
+  }
+  #hud {
+    position: fixed; bottom: 12px; left: 12px;
+    color: #555; font-size: 0.8rem; z-index: 5;
+    font-family: 'Courier New', monospace;
+    pointer-events: none;
+  }
+  #player-list {
+    position: fixed; top: 12px; right: 12px;
+    color: #888; font-size: 0.8rem; z-index: 5;
+    font-family: 'Courier New', monospace;
+    text-align: right; pointer-events: none;
+  }
+  #player-list .player { margin-bottom: 2px; }
+  #emote-bar {
+    position: fixed; bottom: 12px; right: 12px;
+    display: flex; gap: 8px; z-index: 5;
+  }
+  #emote-bar button {
+    background: #1a1a2e; border: 1px solid #333;
+    font-size: 1.4rem; padding: 6px 10px; border-radius: 8px;
+    cursor: pointer; transition: transform 0.1s, border-color 0.2s;
+  }
+  #emote-bar button:hover { transform: scale(1.2); border-color: #7c6fff; }
+</style>
+</head>
+<body>
+
+<div id="join-screen">
+  <div class="ascii-hero"> /\_/\
+( o.o )
+ > ^ <</div>
+  <h1>cat</h1>
+  <input type="text" id="name-input" placeholder="name your cat" maxlength="12" autofocus>
+  <button id="join-btn">join</button>
+  <div class="room-info" id="room-info">room: default</div>
+</div>
+
+<canvas id="c"></canvas>
+
+<div id="hud"></div>
+<div id="player-list"></div>
+<div id="emote-bar" style="display:none">
+  <button data-emote="♥">♥</button>
+  <button data-emote="♪">♪</button>
+  <button data-emote="★">★</button>
+  <button data-emote="⚡">⚡</button>
+  <button data-emote="🐟">🐟</button>
+</div>
+
+<script>
+const WS_URL = 'wss://cat-relay-production.up.railway.app';
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// --- Constants ---
+const MOODS = ['idle','happy','sleepy','excited','love','dizzy','dance','eat','pounce','spin'];
+const MOOD_WEIGHTS = [3,3,2,2,1,1,3,2,1,2];
+const CATS = {
+  idle:    [[' /\\_/\\ ','( o.o )',' > ^ < '],[' /\\_/\\ ','( o.o )','  > <  ']],
+  happy:   [[' /\\_/\\ ','( ^.^ )',' > ^ < '],[' /\\_/\\ ','( ^o^ )','  > <  ']],
+  sleepy:  [[' /\\_/\\ ','( -.- )',' > ^ <  z'],[' /\\_/\\ ','( -.- )',' > ^ < zZ'],[' /\\_/\\ ','( -.- )',' > ^ < zZz']],
+  excited: [['  /\\_/\\ ',' ( O.O )','  > ^ < '],[' /\\_/\\ ','( O.O )',' > ^ < ']],
+  love:    [[' /\\_/\\  ♥','( ^.^ ) ♥',' > ^ <   '],[' /\\_/\\ ♥ ','( ^.^ )♥ ',' > ^ <   ']],
+  dizzy:   [[' /\\_/\\ ','( @.@ )',' > ~ < '],[' /\\_/\\ ','( @.@ )',' < ~ > ']],
+  dance:   [[' /\\_/\\  ♪','( ^o^ ) ♪',' \\> ^    '],['♪  /\\_/\\ ','♪ ( ^o^ )','   ^ </  ']],
+  eat:     [[' /\\_/\\    ','( o.o )🐟 ',' > ^ <    '],[' /\\_/\\  ','( o.o )~',' > ^ <  '],[' /\\_/\\ ','( ^.^ )',' > ^ < ']],
+  pounce:  [[' /\\_/\\     ','( O.O )    ',' />  <\\    '],['     /\\_/\\ ','    ( >.< )','    /> <\\  ']],
+  spin:    [[' /\\_/\\ ','( o.o )',' > ^ < '],[' \\/_\\/ ','( o.o )',' > ^ < '],[' /\\_/\\ ',') o.o (',' < ^ > '],[' /\\_/\\ ','( o.o )',' > v < ']],
+};
+const THOUGHTS = [
+  'thinking about fish...','world domination?','nap time soon...','what\'s that red dot?!',
+  'knock something off a table?','ZOOMIES!!!','if I fits, I sits','hooman is weird',
+  'must... catch... tail...','plotting...','*purrrrrr*','why is the floor lava?',
+  '3am energy incoming','bird.exe detected','one braincell activated','the audacity...',
+  'treat? TREAT??','I see dead mice','*judges you silently*','this box is mine now','chaos mode: ON',
+];
+const SPARKLE_CHARS = ['✦','★','·','♥','✧','⋆','♪','~','°','∘'];
+const TRAIL_CHARS = ['·','✦','★','♦','•','~','⋆','✧','∘','♪'];
+const FRIEND_HUES = [0, 120, 200, 50, 280, 30, 160, 310, 80, 240, 350, 140, 190, 330, 70];
+
+let W, H, COLS, ROWS, CHAR_W, CHAR_H;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  ctx.font = '16px Courier New';
+  const m = ctx.measureText('M');
+  CHAR_W = m.width;
+  CHAR_H = 18;
+  COLS = Math.floor(W / CHAR_W);
+  ROWS = Math.floor(H / CHAR_H);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// --- Helpers ---
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function weightedPick(arr, weights) {
+  const total = weights.reduce((a,b) => a+b, 0);
+  let r = Math.random() * total;
+  for (let i = 0; i < arr.length; i++) { r -= weights[i]; if (r <= 0) return arr[i]; }
+  return arr[arr.length - 1];
+}
+function hslColor(h, s = 80, l = 65) { return `hsl(${h},${s}%,${l}%)`; }
+function randColor() { return hslColor(Math.random() * 360); }
+
+// --- Stars ---
+const stars = [];
+for (let i = 0; i < 30; i++) stars.push({ x: Math.random(), y: Math.random(), ch: pick(['.','·','*','✦','⋆']), bright: Math.random() });
+
+function drawStars() {
+  for (const s of stars) {
+    const flicker = Math.random() < 0.02;
+    if (flicker) { s.x = Math.random(); s.y = Math.random(); }
+    const l = 20 + (Math.random() < 0.08 ? 40 : 0);
+    ctx.fillStyle = `hsl(0,0%,${l}%)`;
+    ctx.fillText(s.ch, s.x * W, s.y * H);
+  }
+}
+
+// --- Pet class ---
+class CatPet {
+  constructor(name) {
+    this.name = name;
+    this.x = 0.5; this.y = 0.5;
+    this.vx = pick([-0.008, -0.005, 0.005, 0.008]);
+    this.vy = pick([-0.005, 0.005]);
+    this.mood = 'idle'; this.moodTimer = 0;
+    this.frame = 0; this.tick = 0;
+    this.hue = Math.random() * 360; this.hueTimer = 0;
+    this.thought = null; this.thoughtTimer = 0;
+    this.trail = []; this.trailOn = false;
+    this.particles = [];
+    this.rainbow = false;
+    this.gravity = false;
+  }
+
+  pickMood() {
+    const old = this.mood;
+    this.mood = weightedPick(MOODS, MOOD_WEIGHTS);
+    this.moodTimer = 20 + Math.random() * 60;
+    if (old === 'dance') this.rainbow = false;
+    if (this.mood === 'excited') { this.vx = pick([-0.015,-0.01,0.01,0.015]); this.vy = pick([-0.01,0.01]); }
+    else if (this.mood === 'sleepy') { this.vx = 0; this.vy = 0; }
+    else if (this.mood === 'dance') this.rainbow = true;
+    else if (this.mood === 'pounce') { this.vx = pick([-0.02,0.02]); this.vy = pick([-0.01,0.01]); }
+    if (Math.random() < 0.3) this.burst();
+  }
+
+  burst() {
+    for (let i = 0; i < 3 + Math.random() * 5; i++) {
+      this.particles.push({
+        x: this.x + (Math.random() - 0.3) * 0.05,
+        y: this.y + (Math.random() - 0.3) * 0.03,
+        vx: (Math.random() - 0.5) * 0.01,
+        vy: (Math.random() - 0.7) * 0.008,
+        life: 10 + Math.random() * 20,
+        ch: pick(SPARKLE_CHARS),
+        hue: Math.random() * 360,
+      });
+    }
+  }
+
+  update() {
+    this.tick++;
+    this.moodTimer--;
+    if (this.moodTimer <= 0) this.pickMood();
+
+    this.thoughtTimer--;
+    if (this.thoughtTimer <= 0) {
+      this.thought = Math.random() < 0.3 ? pick(THOUGHTS) : null;
+      this.thoughtTimer = this.thought ? 25 + Math.random() * 40 : 10 + Math.random() * 20;
+    }
+
+    this.hueTimer--;
+    if (this.hueTimer <= 0) {
+      if (this.rainbow) { this.hue = (this.hue + 8) % 360; this.hueTimer = 1; }
+      else { this.hue = Math.random() * 360; this.hueTimer = 15 + Math.random() * 35; }
+    }
+
+    if (Math.random() < 0.01) this.trailOn = !this.trailOn;
+    if (Math.random() < 0.08 && this.mood !== 'sleepy') {
+      this.vx += (Math.random() - 0.5) * 0.004;
+      this.vy += (Math.random() - 0.5) * 0.003;
+      this.vx = Math.max(-0.02, Math.min(0.02, this.vx));
+      this.vy = Math.max(-0.012, Math.min(0.012, this.vy));
+    }
+    if (Math.random() < 0.005) this.gravity = !this.gravity;
+    if (this.gravity && this.mood !== 'sleepy') this.vy = Math.min(0.012, this.vy + 0.002);
+
+    if (this.trailOn) {
+      this.trail.push({ x: this.x, y: this.y, ch: pick(TRAIL_CHARS), hue: this.hue, life: 30 });
+      if (this.trail.length > 30) this.trail.shift();
+    }
+    this.trail = this.trail.filter(t => { t.life--; return t.life > 0; });
+
+    this.x += this.vx; this.y += this.vy;
+    if (this.x < 0.02) { this.x = 0.02; this.vx = Math.abs(this.vx) || 0.005; this.burst(); }
+    if (this.x > 0.88) { this.x = 0.88; this.vx = -(Math.abs(this.vx) || 0.005); this.burst(); }
+    if (this.y < 0.05) { this.y = 0.05; this.vy = Math.abs(this.vy) || 0.004; }
+    if (this.y > 0.9) { this.y = 0.9; this.vy = this.gravity ? -(0.008 + Math.random() * 0.005) : -(Math.abs(this.vy) || 0.004); }
+
+    this.particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.life--; });
+    this.particles = this.particles.filter(p => p.life > 0);
+
+    this.frame = (this.frame + 1) % (CATS[this.mood]?.length || 1);
+  }
+
+  draw(isMe) {
+    const frames = CATS[this.mood] || CATS.idle;
+    const frame = frames[this.frame % frames.length];
+    const px = this.x * W;
+    const py = this.y * H;
+
+    // trail
+    for (const t of this.trail) {
+      const alpha = t.life / 30;
+      ctx.fillStyle = hslColor(t.hue, 60, 50 + (1 - alpha) * 30);
+      ctx.globalAlpha = alpha;
+      ctx.fillText(t.ch, t.x * W, t.y * H);
+    }
+    ctx.globalAlpha = 1;
+
+    // particles
+    for (const p of this.particles) {
+      ctx.fillStyle = hslColor(p.hue, 80, 70);
+      ctx.globalAlpha = p.life / 30;
+      ctx.fillText(p.ch, p.x * W, p.y * H);
+    }
+    ctx.globalAlpha = 1;
+
+    // cat body
+    for (let i = 0; i < frame.length; i++) {
+      const line = frame[i];
+      for (let j = 0; j < line.length; j++) {
+        if (line[j] === ' ') continue;
+        if (this.rainbow) {
+          ctx.fillStyle = hslColor((this.tick * 8 + j * 20 + i * 40) % 360, 90, 65);
+        } else {
+          ctx.fillStyle = hslColor(this.hue, isMe ? 80 : 70, isMe ? 65 : 55);
+        }
+        ctx.fillText(line[j], px + j * CHAR_W, py + i * CHAR_H);
+      }
+    }
+
+    // name tag
+    const tagColor = isMe ? '#fff' : hslColor(this.hue, 70, 55);
+    const tag = isMe ? `${this.name} (you)` : this.name;
+    ctx.fillStyle = tagColor;
+    ctx.fillText(tag, px, py - 8);
+
+    // thought bubble
+    if (this.thought && isMe) {
+      const tx = px + 12 * CHAR_W;
+      let ty = py - CHAR_H * 1.5;
+      if (ty < 20) ty = py + CHAR_H * 4;
+      const border = `╭${'─'.repeat(this.thought.length + 2)}╮`;
+      const text   = `│ ${this.thought} │`;
+      const bottom = `╰${'─'.repeat(this.thought.length + 2)}╯`;
+      ctx.fillStyle = 'rgba(200,200,255,0.8)';
+      ctx.fillText(border, tx, ty);
+      ctx.fillText(text, tx, ty + CHAR_H);
+      ctx.fillText(bottom, tx, ty + CHAR_H * 2);
+    }
+  }
+}
+
+// --- Network ---
+let ws = null, myId = null, myName = '', room = 'default';
+let peers = {}, roster = {}, emotes = [];
+let connected = false;
+
+function getRoom() {
+  const params = new URLSearchParams(location.search);
+  return params.get('room') || 'default';
+}
+
+function connect() {
+  room = getRoom();
+  document.getElementById('room-info').textContent = `room: ${room}`;
+  myId = Math.random().toString(36).slice(2, 10);
+
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => {
+    connected = true;
+    ws.send(JSON.stringify({ type: 'join', id: myId, name: myName, room }));
+  };
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'states') peers = msg.peers || {};
+    else if (msg.type === 'roster') roster = msg.players || {};
+    else if (msg.type === 'emote') emotes.push({ from: msg.from, emote: msg.emote, t: Date.now() + 3000 });
+  };
+  ws.onclose = () => { connected = false; setTimeout(connect, 2000); };
+  ws.onerror = () => ws.close();
+}
+
+function sendState(pet) {
+  if (!ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify({ type: 'state', data: {
+    name: pet.name, x: pet.x, y: pet.y, mood: pet.mood, color: pet.hue, frame: pet.frame
+  }}));
+}
+
+function sendEmote(emote) {
+  if (!ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify({ type: 'emote', emote }));
+}
+
+// --- Friend pets (from network) ---
+const friendPets = {}; // pid -> CatPet used for rendering
+function getFriendPet(pid, state) {
+  if (!friendPets[pid]) {
+    friendPets[pid] = new CatPet(state.name || '???');
+    friendPets[pid].hue = FRIEND_HUES[Object.keys(friendPets).length % FRIEND_HUES.length] || Math.random() * 360;
+  }
+  const fp = friendPets[pid];
+  // lerp toward network position for smooth movement
+  fp.x += (state.x - fp.x) * 0.15;
+  fp.y += (state.y - fp.y) * 0.15;
+  fp.mood = state.mood || 'idle';
+  fp.name = state.name || roster[pid] || '???';
+  fp.frame = state.frame || 0;
+  return fp;
+}
+
+// --- Main loop ---
+let pet = null;
+let netTick = 0;
+
+function loop() {
+  resize();
+  ctx.clearRect(0, 0, W, H);
+  ctx.font = '16px Courier New';
+
+  drawStars();
+
+  if (!pet) { requestAnimationFrame(loop); return; }
+
+  pet.update();
+
+  // draw friends
+  for (const [pid, state] of Object.entries(peers)) {
+    const fp = getFriendPet(pid, state);
+    fp.draw(false);
+  }
+  // clean up disconnected friends
+  for (const pid of Object.keys(friendPets)) {
+    if (!peers[pid]) delete friendPets[pid];
+  }
+
+  pet.draw(true);
+
+  // draw floating emotes
+  const now = Date.now();
+  emotes = emotes.filter(e => e.t > now);
+  for (let i = 0; i < Math.min(emotes.length, 5); i++) {
+    const e = emotes[emotes.length - 1 - i];
+    ctx.fillStyle = 'rgba(255,255,200,0.9)';
+    ctx.fillText(`${e.from}: ${e.emote}`, W / 2 - 60, 40 + i * 22);
+  }
+
+  // send network state every 3 frames
+  netTick++;
+  if (netTick % 3 === 0) sendState(pet);
+
+  // HUD
+  const names = Object.values(roster);
+  document.getElementById('hud').textContent =
+    `mood: ${pet.mood}${pet.rainbow ? '  🌈 rainbow' : ''}${pet.gravity ? '  🌍 gravity' : ''}${pet.trailOn ? '  ✨ trail' : ''}  ${connected ? '🟢' : '🔴'} ${names.length} online`;
+
+  document.getElementById('player-list').innerHTML =
+    names.map(n => `<div class="player">${n === myName ? `<b>${n} (you)</b>` : n}</div>`).join('');
+
+  requestAnimationFrame(loop);
+}
+
+// --- Join flow ---
+document.getElementById('join-btn').addEventListener('click', startGame);
+document.getElementById('name-input').addEventListener('keydown', e => { if (e.key === 'Enter') startGame(); });
+
+function startGame() {
+  myName = document.getElementById('name-input').value.trim() || 'cat';
+  document.getElementById('join-screen').classList.add('hidden');
+  document.getElementById('emote-bar').style.display = 'flex';
+  pet = new CatPet(myName);
+  connect();
+}
+
+document.querySelectorAll('#emote-bar button').forEach(btn => {
+  btn.addEventListener('click', () => sendEmote(btn.dataset.emote));
+});
+
+// kick off render (stars animate before join)
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
