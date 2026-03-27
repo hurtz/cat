@@ -32,6 +32,14 @@ async def handler(ws):
                     # broadcast all states to the room
                     await broadcast_states(room, client_id)
 
+            elif msg.get("type") == "action" and client_id and room:
+                # broadcast action to all clients in the room (including sender)
+                await broadcast_action(room, client_id, msg.get("data", {}))
+
+            elif msg.get("type") == "chat" and client_id and room:
+                # broadcast chat message to all clients in the room
+                await broadcast_chat(room, client_id, msg.get("text", ""))
+
             elif msg.get("type") == "emote" and client_id and room:
                 # broadcast emote to everyone in the room
                 await broadcast_emote(room, client_id, msg.get("emote", "♥"))
@@ -67,6 +75,23 @@ async def broadcast_states(room, sender_id):
             await info["ws"].send(json.dumps({"type": "states", "peers": peer_states}))
         except Exception:
             pass
+
+
+async def broadcast_action(room, sender_id, data):
+    if room not in ROOMS:
+        return
+    sender_info = ROOMS[room].get(sender_id, {})
+    sender_name = sender_info.get("state", {}).get("name", "cat")
+    msg = json.dumps({"type": "action", "from_id": sender_id, "from_name": sender_name, "data": data})
+    await broadcast(room, msg)
+
+
+async def broadcast_chat(room, sender_id, text):
+    if room not in ROOMS:
+        return
+    sender_name = ROOMS[room].get(sender_id, {}).get("state", {}).get("name", "cat")
+    msg = json.dumps({"type": "chat", "from": sender_name, "text": text})
+    await broadcast(room, msg)
 
 
 async def broadcast_emote(room, sender_id, emote):
