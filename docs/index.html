@@ -1,0 +1,1377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>cat</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0f;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    cursor: none;
+  }
+  canvas { display: block; }
+  #join-screen {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    z-index: 10;
+    background: #0a0a0f;
+    transition: opacity 0.5s;
+  }
+  #join-screen.hidden { opacity: 0; pointer-events: none; }
+  #join-screen h1 {
+    font-size: 3rem; color: #fff;
+    margin-bottom: 0.5rem;
+  }
+  #join-screen .ascii-hero {
+    color: #888; font-size: 1.5rem;
+    line-height: 1.2; margin-bottom: 1.5rem;
+    white-space: pre; text-align: center;
+    transition: color 0.3s;
+  }
+  #join-screen input {
+    background: #1a1a2e; border: 2px solid #333;
+    color: #fff; font-size: 1.3rem; padding: 0.7rem 1.2rem;
+    border-radius: 8px; width: 260px; text-align: center;
+    font-family: 'Courier New', monospace;
+    outline: none; transition: border-color 0.2s;
+  }
+  #join-screen input:focus { border-color: #7c6fff; }
+  #join-screen input::placeholder { color: #555; }
+  #char-picker {
+    display: flex; gap: 10px; margin: 1.2rem 0; flex-wrap: wrap;
+    justify-content: center; max-width: 500px;
+  }
+  #char-picker .char-option {
+    background: #1a1a2e; border: 2px solid #333;
+    border-radius: 10px; padding: 10px 14px;
+    cursor: pointer; text-align: center;
+    transition: border-color 0.2s, transform 0.15s, background 0.2s;
+    white-space: pre; font-size: 0.75rem; line-height: 1.3;
+    color: #aaa; min-width: 80px;
+  }
+  #char-picker .char-option:hover { border-color: #555; transform: scale(1.08); }
+  #char-picker .char-option.selected { border-color: #7c6fff; background: #252545; color: #fff; }
+  #char-picker .char-label { font-size: 0.7rem; color: #777; margin-top: 4px; }
+  #personality-picker {
+    display: flex; gap: 8px; margin: 0.8rem 0; flex-wrap: wrap;
+    justify-content: center; max-width: 500px;
+  }
+  #personality-picker .pers-option {
+    background: #1a1a2e; border: 1px solid #333;
+    border-radius: 6px; padding: 5px 12px;
+    cursor: pointer; font-size: 0.8rem; color: #888;
+    transition: all 0.2s;
+  }
+  #personality-picker .pers-option:hover { border-color: #555; color: #bbb; }
+  #personality-picker .pers-option.selected { border-color: #7c6fff; color: #fff; background: #252545; }
+  #join-screen button.join-btn {
+    margin-top: 1rem; padding: 0.7rem 2.5rem;
+    background: #7c6fff; color: #fff; border: none;
+    border-radius: 8px; font-size: 1.2rem; cursor: pointer;
+    font-family: 'Courier New', monospace;
+    transition: background 0.2s, transform 0.1s;
+  }
+  #join-screen button.join-btn:hover { background: #6a5aef; transform: scale(1.05); }
+  .section-label { color: #555; font-size: 0.75rem; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 1px; }
+  .room-info { color: #555; font-size: 0.85rem; margin-top: 1.5rem; }
+  #hud {
+    position: fixed; bottom: 12px; left: 12px;
+    color: #555; font-size: 0.8rem; z-index: 5;
+    pointer-events: none;
+  }
+  #player-list {
+    position: fixed; top: 12px; right: 12px;
+    color: #888; font-size: 0.8rem; z-index: 5;
+    text-align: right; pointer-events: none;
+  }
+  #player-list .player { margin-bottom: 2px; }
+  #emote-bar {
+    position: fixed; bottom: 12px; right: 12px;
+    display: flex; gap: 8px; z-index: 5;
+  }
+  #emote-bar button {
+    background: #1a1a2e; border: 1px solid #333;
+    font-size: 1.4rem; padding: 6px 10px; border-radius: 8px;
+    cursor: pointer; transition: transform 0.1s, border-color 0.2s;
+  }
+  #emote-bar button:hover { transform: scale(1.2); border-color: #7c6fff; }
+
+  /* Action Input Bar */
+  #action-bar {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    z-index: 6; display: none;
+  }
+  #action-input {
+    background: rgba(20, 20, 40, 0.85);
+    border: 1px solid #444;
+    color: #ddd; font-size: 1rem; padding: 10px 20px;
+    border-radius: 20px; width: 380px; text-align: center;
+    font-family: 'Courier New', monospace;
+    outline: none; transition: border-color 0.2s, width 0.2s;
+    backdrop-filter: blur(8px);
+  }
+  #action-input:focus { border-color: #7c6fff; width: 440px; }
+  #action-input::placeholder { color: #666; transition: opacity 0.3s; }
+
+  /* Activity Feed */
+  #activity-feed {
+    position: fixed; bottom: 70px; left: 12px;
+    z-index: 5; pointer-events: none;
+    font-size: 0.75rem; max-width: 320px;
+  }
+  #activity-feed .feed-item {
+    color: #888; margin-bottom: 3px;
+    transition: opacity 0.5s;
+    text-shadow: 0 0 4px rgba(0,0,0,0.8);
+  }
+  #activity-feed .feed-item.fading { opacity: 0.3; }
+  #activity-feed .feed-item.old { opacity: 0.15; }
+</style>
+</head>
+<body>
+
+<div id="join-screen">
+  <div class="ascii-hero" id="hero-preview"> /\_/\
+( o.o )
+ > ^ <</div>
+  <h1>cat</h1>
+  <input type="text" id="name-input" placeholder="name your pet" maxlength="12" autofocus>
+
+  <div class="section-label" style="margin-top:1rem">character</div>
+  <div id="char-picker"></div>
+
+  <div class="section-label">personality</div>
+  <div id="personality-picker"></div>
+
+  <button class="join-btn" id="join-btn">join</button>
+  <div class="room-info" id="room-info">room: default</div>
+</div>
+
+<canvas id="c"></canvas>
+
+<div id="hud"></div>
+<div id="player-list"></div>
+<div id="emote-bar" style="display:none">
+  <button data-emote="♥">♥</button>
+  <button data-emote="♪">♪</button>
+  <button data-emote="★">★</button>
+  <button data-emote="⚡">⚡</button>
+  <button data-emote="🐟">🐟</button>
+</div>
+
+<div id="action-bar">
+  <input type="text" id="action-input" placeholder="type an action..." maxlength="100">
+</div>
+
+<div id="activity-feed"></div>
+
+<script>
+const WS_URL = 'wss://cat-relay-production.up.railway.app';
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// ─── CHARACTER SPRITES ──────────────────────────────────────────
+const CHARACTERS = {
+  cat: {
+    preview: ' /\\_/\\\n( o.o )\n > ^ <',
+    idle:    [[' /\\_/\\ ','( o.o )',' > ^ < '],[' /\\_/\\ ','( o.o )','  > <  ']],
+    happy:   [[' /\\_/\\ ','( ^.^ )',' > ^ < '],[' /\\_/\\ ','( ^o^ )','  > <  ']],
+    sleepy:  [[' /\\_/\\ ','( -.- )',' > ^ <  z'],[' /\\_/\\ ','( -.- )',' > ^ < zZ'],[' /\\_/\\ ','( -.- )',' > ^ < zZz']],
+    excited: [['  /\\_/\\ ',' ( O.O )','  > ^ < '],[' /\\_/\\ ','( O.O )',' > ^ < ']],
+    love:    [[' /\\_/\\  ♥','( ^.^ ) ♥',' > ^ <   '],[' /\\_/\\ ♥ ','( ^.^ )♥ ',' > ^ <   ']],
+    dizzy:   [[' /\\_/\\ ','( @.@ )',' > ~ < '],[' /\\_/\\ ','( @.@ )',' < ~ > ']],
+    dance:   [[' /\\_/\\  ♪','( ^o^ ) ♪',' \\> ^    '],['♪  /\\_/\\ ','♪ ( ^o^ )','   ^ </  ']],
+    eat:     [[' /\\_/\\    ','( o.o )🐟 ',' > ^ <    '],[' /\\_/\\ ','( ^.^ )',' > ^ < ']],
+    pounce:  [[' /\\_/\\     ','( O.O )    ',' />  <\\    '],['     /\\_/\\ ','    ( >.< )','    /> <\\  ']],
+    spin:    [[' /\\_/\\ ','( o.o )',' > ^ < '],[' \\/_\\/ ','( o.o )',' > ^ < '],[' /\\_/\\ ',') o.o (',' < ^ > '],[' /\\_/\\ ','( o.o )',' > v < ']],
+  },
+  dog: {
+    preview: ' /^ ^\\\n( o.o )\n ( Y ) ',
+    idle:    [[' /^ ^\\  ','( o.o ) ',' ( Y )  '],[' /^ ^\\  ','( o.o ) ','  ( Y ) ']],
+    happy:   [[' /^ ^\\  ','( ^.^ ) ',' ( Y )~ '],[' /^ ^\\  ','( ^o^ ) ','  ( Y )~']],
+    sleepy:  [[' /^ ^\\  ','( -.- ) ',' ( Y ) z'],[' /^ ^\\  ','( -.- ) ',' ( Y )zZ']],
+    excited: [[' /^ ^\\  ','( O.O ) ',' ( Y )! '],[' /^ ^\\  ','( O.O )!','  ( Y )!']],
+    love:    [[' /^ ^\\  ♥','( ^.^ ) ♥',' ( Y )   '],[' /^ ^\\  ','( ^.^ )♥ ',' ( Y )   ']],
+    dizzy:   [[' /^ ^\\  ','( @.@ ) ',' ( Y )  '],[' /^ ^\\  ','( @.@ ) ','  ( Y ) ']],
+    dance:   [[' /^ ^\\  ♪','( ^o^ ) ♪',' \\( Y )  '],['♪ /^ ^\\  ','♪ ( ^o^ )','  ( Y )/  ']],
+    eat:     [[' /^ ^\\    ','( o.o )🦴 ',' ( Y )    '],[' /^ ^\\  ','( ^.^ ) ',' ( Y )  ']],
+    pounce:  [[' /^ ^\\     ','( O.O )    ',' />   <\\   '],['     /^ ^\\ ','    ( >.< )','    /> <\\  ']],
+    spin:    [[' /^ ^\\  ','( o.o ) ',' ( Y )  '],[' \\v v/  ','( o.o ) ',' ( Y )  ']],
+  },
+  bunny: {
+    preview: ' (\\ /)\n ( . .)\nc(")(") ',
+    idle:    [[' (\\ /) ','( . . )','c(")(")'],[' (\\ /) ','( . . )','c(")(" )']],
+    happy:   [[' (\\ /) ','( ^.^ )','c(")(")'],[' (\\ /) ','( ^o^ )','c(")(" )']],
+    sleepy:  [[' (\\ /) ','( -.- )','c(")(") z'],[' (\\ /) ','( -.- )','c(")(") zZ']],
+    excited: [[' (\\!/) ','( O.O )','c(")(")'],[' (\\!/) ','( O.O )','c(")(" )']],
+    love:    [[' (\\ /) ♥','( ^.^ ) ♥','c(")(")'],[' (\\ /) ','( ^.^ )♥','c(")(")  ']],
+    dizzy:   [[' (\\ /) ','( @.@ )','c(")(")'],[' (\\ /) ','( @.@ )','c(")(" )']],
+    dance:   [[' (\\ /) ♪','( ^o^ ) ♪','c\\")("  '],['♪(\\ /)  ','♪( ^o^ )','  (")/c ']],
+    eat:     [[' (\\ /)   ','( o.o )🥕','c(")(")'],[' (\\ /) ','( ^.^ )','c(")("  )']],
+    pounce:  [[' (\\ /)    ','( O.O )   ','c/>  <\\   '],['    (\\ /) ','   ( >.< )','   /> <\\c ']],
+    spin:    [[' (\\ /) ','( o.o )','c(")(")'],[' (/\\) ','( o.o )','c(")(")'],[' (\\ /) ',') o.o (','(")(")c']],
+  },
+  fox: {
+    preview: '/\\   /\\\n( o.o )\n >  w <',
+    idle:    [['/\\   /\\ ','( o.o ) ',' > w <  '],['/\\   /\\ ','( o.o ) ','  > w < ']],
+    happy:   [['/\\   /\\ ','( ^.^ ) ',' > w <  '],['/\\   /\\ ','( ^o^ ) ','  > w < ']],
+    sleepy:  [['/\\   /\\ ','( -.- ) ',' > w < z'],['/\\   /\\ ','( -.- ) ',' > w <zZ']],
+    excited: [['/\\   /\\ ','( O.O ) ',' > w < !'],['/\\   /\\!','( O.O ) ',' > w <  ']],
+    love:    [['/\\   /\\ ♥','( ^.^ ) ♥',' > w <   '],['/\\   /\\  ','( ^.^ )♥ ',' > w <   ']],
+    dizzy:   [['/\\   /\\ ','( @.@ ) ',' > ~ <  '],['/\\   /\\ ','( @.@ ) ',' < ~ >  ']],
+    dance:   [['/\\   /\\ ♪','( ^o^ ) ♪',' \\> w   '],['♪/\\   /\\ ','♪ ( ^o^ )','   w </  ']],
+    eat:     [['/\\   /\\   ','( o.o )🐔 ',' > w <    '],['/\\   /\\ ','( ^.^ ) ',' > w <  ']],
+    pounce:  [['/\\   /\\    ','( O.O )    ',' />   <\\   '],['    /\\  /\\ ','    ( >.< )','    /> <\\  ']],
+    spin:    [['/\\   /\\ ','( o.o ) ',' > w <  '],['\\/   \\/ ','( o.o ) ',' > w <  ']],
+  },
+  bear: {
+    preview: 'ʕ •ᴥ• ʔ\n ( . . )\n  > ~ <',
+    idle:    [['ʕ •ᴥ• ʔ','( . . ) ',' > ~ <  '],['ʕ •ᴥ• ʔ','( . . ) ','  > ~ < ']],
+    happy:   [['ʕ •ᴥ• ʔ','( ^.^ ) ',' > ~ <  '],['ʕ •ᴥ• ʔ','( ^o^ ) ','  > ~ < ']],
+    sleepy:  [['ʕ •ᴥ• ʔ','( -.- ) ',' > ~ < z'],['ʕ •ᴥ• ʔ','( -.- ) ',' > ~ <zZ']],
+    excited: [['ʕ •ᴥ• ʔ','( O.O ) ',' > ~ <!'],['ʕ •ᴥ• ʔ','( O.O )!','  > ~ < ']],
+    love:    [['ʕ •ᴥ• ʔ♥','( ^.^ ) ♥',' > ~ <   '],['ʕ •ᴥ• ʔ ','( ^.^ )♥ ',' > ~ <   ']],
+    dizzy:   [['ʕ •ᴥ• ʔ','( @.@ ) ',' > ~ <  '],['ʕ •ᴥ• ʔ','( @.@ ) ',' < ~ >  ']],
+    dance:   [['ʕ •ᴥ• ʔ♪','( ^o^ ) ♪',' \\> ~    '],['♪ʕ •ᴥ• ʔ','♪ ( ^o^ )','   ~ </  ']],
+    eat:     [['ʕ •ᴥ• ʔ   ','( o.o )🍯  ',' > ~ <     '],['ʕ •ᴥ• ʔ','( ^.^ ) ',' > ~ <  ']],
+    pounce:  [['ʕ •ᴥ• ʔ    ','( O.O )    ',' />   <\\   '],['    ʕ •ᴥ• ʔ','    ( >.< ) ','    /> <\\   ']],
+    spin:    [['ʕ •ᴥ• ʔ','( o.o ) ',' > ~ <  '],['ʕ •ᴥ• ʔ',') o.o ( ',' < ~ >  ']],
+  },
+  ghost: {
+    preview: '  .-. \n ( o o)\n | O |\n  ^^^',
+    idle:    [['  .-.  ','( o o) ','| O |  ','  ^^^  '],['  .-.  ','( o o) ','| O |  ',' ^^^   ']],
+    happy:   [['  .-.  ','( ^ ^) ','| O |  ','  ^^^  '],['  .-.  ','( ^o^) ','| O |  ',' ^^^   ']],
+    sleepy:  [['  .-.  ','( - -) ','| O |  ','  ^^^ z'],['  .-.  ','( - -) ','| O |  ',' ^^^ zZ']],
+    excited: [['  .-.  ','( O O) ','| ! |  ','  ^^^  '],['  .-.  ','( O O)!','| ! |  ',' ^^^   ']],
+    love:    [['  .-.  ♥','( ^ ^) ♥','| O |   ','  ^^^   '],['  .-.   ','( ^ ^)♥ ','| O |   ',' ^^^    ']],
+    dizzy:   [['  .-.  ','( @ @) ','| ~ |  ','  ^^^  '],['  .-.  ','( @ @) ','| ~ |  ',' ^^^   ']],
+    dance:   [['  .-.  ♪','( ^o^) ♪','| O |   ','  \\^^   '],['♪ .-.   ','♪( ^o^) ','  | O | ','   ^^/  ']],
+    eat:     [['  .-.     ','( o o) 👻','| O |     ','  ^^^     '],['  .-.  ','( ^.^) ','| O |  ','  ^^^  ']],
+    pounce:  [['  .-.      ','( O O)     ','| ! |      ','  ^^^      '],['      .-.  ','     (O O) ','     | ! | ','      ^^^  ']],
+    spin:    [['  .-.  ','( o o) ','| O |  ','  ^^^  '],[' .-.   ','(o o ) ','| O |  ',' ^^^   ']],
+  },
+  robot: {
+    preview: ' [===]\n |o o|\n |___|\n  d b',
+    idle:    [[' [===] ','|o  o| ','|___| ','  d b  '],[' [===] ','| o o| ','|___| ',' d b   ']],
+    happy:   [[' [===] ','|^  ^| ','|___| ','  d b  '],[' [===] ','| ^ ^| ','|___| ',' d b   ']],
+    sleepy:  [[' [===] ','|- - | ','|___| ','  d b z'],[' [===] ','|- - | ','|___| ',' d b zZ']],
+    excited: [[' [===] ','|O  O| ','|!!!| ','  d b  '],[' [===] ','|O  O|!','|!!!| ',' d b   ']],
+    love:    [[' [===] ♥','|^  ^| ♥','|___| ','  d b   '],[' [===]  ','|^  ^|♥ ','|___|   ',' d b    ']],
+    dizzy:   [[' [===] ','|@  @| ','|~~~| ','  d b  '],[' [===] ','| @ @| ','|~~~| ',' d b   ']],
+    dance:   [[' [===] ♪','|^  ^| ♪','|___| ',' \\d b   '],['♪[===]  ','♪|^ ^|  ','  |___| ','   d b/ ']],
+    eat:     [[' [===]    ','|o  o| 🔋','|___| ','  d b     '],[' [===] ','|^  ^| ','|___| ','  d b  ']],
+    pounce:  [[' [===]      ','|O  O|     ','|!!!|      ','  d b      '],['      [===] ','     |O  O| ','     |!!!|  ','      d b   ']],
+    spin:    [[' [===] ','|o  o| ','|___| ','  d b  '],[' ]===[ ','|o  o| ','|___| ','  d b  ']],
+  },
+};
+
+// ─── PERSONALITIES ──────────────────────────────────────────────
+const PERSONALITIES = {
+  default:    { energy: 1.0, chaos: 0.5, label: 'balanced', thoughts: [] },
+  jason:      { energy: 0.8, chaos: 0.6, label: 'builder', thoughts: ['shipping another app...','bias toward action','just build it','claude, handle it','idea factory mode: ON'] },
+  chill:      { energy: 0.4, chaos: 0.2, label: 'relaxed', thoughts: ['vibes only...','no rush','peaceful af','just existing','*deep breath*'] },
+  chaotic:    { energy: 1.5, chaos: 1.0, label: 'unhinged', thoughts: ['LEEROY JENKINS','hold my beer','yeet!','this is fine 🔥','CHAOS REIGNS','no regrets!'] },
+  sleepy:     { energy: 0.2, chaos: 0.1, label: 'drowsy', thoughts: ['five more minutes...','is it bedtime?','*yawns*','dreams of fish...','so... tired...'] },
+  hyper:      { energy: 1.8, chaos: 0.8, label: 'caffeinated', thoughts: ['GOTTA GO FAST','can\'t stop won\'t stop','MAXIMUM OVERDRIVE','!!!!!!!!','I AM SPEED'] },
+  mysterious: { energy: 0.6, chaos: 0.5, label: 'enigmatic', thoughts: ['...','you didn\'t see anything','I know things','*stares into void*','the prophecy...'] },
+};
+
+const MOODS = ['idle','happy','sleepy','excited','love','dizzy','dance','eat','pounce','spin'];
+const MOOD_WEIGHTS = [3,3,2,2,1,1,3,2,1,2];
+const THOUGHTS = [
+  'thinking about fish...','world domination?','nap time soon...','what\'s that red dot?!',
+  'knock something off a table?','ZOOMIES!!!','if I fits, I sits','hooman is weird',
+  'must... catch... tail...','plotting...','*purrrrrr*','why is the floor lava?',
+  '3am energy incoming','bird.exe detected','one braincell activated','the audacity...',
+  'treat? TREAT??','I see dead mice','*judges you silently*','this box is mine now','chaos mode: ON',
+];
+const SPARKLE_CHARS = ['✦','★','·','♥','✧','⋆','♪','~','°','∘'];
+const TRAIL_CHARS = ['·','✦','★','♦','•','~','⋆','✧','∘','♪'];
+const FRIEND_HUES = [0, 120, 200, 50, 280, 30, 160, 310, 80, 240, 350, 140, 190, 330, 70];
+
+let W, H, CHAR_W, CHAR_H;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  ctx.font = '16px Courier New';
+  CHAR_W = ctx.measureText('M').width;
+  CHAR_H = 18;
+}
+window.addEventListener('resize', resize);
+resize();
+
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function weightedPick(arr, weights) {
+  const total = weights.reduce((a,b) => a+b, 0);
+  let r = Math.random() * total;
+  for (let i = 0; i < arr.length; i++) { r -= weights[i]; if (r <= 0) return arr[i]; }
+  return arr[arr.length - 1];
+}
+function hslColor(h, s = 80, l = 65) { return `hsl(${h},${s}%,${l}%)`; }
+
+// ─── Stars ──────────────────────────────────────────────────────
+const stars = [];
+for (let i = 0; i < 30; i++) stars.push({ x: Math.random(), y: Math.random(), ch: pick(['.','·','*','✦','⋆']) });
+
+function drawStars() {
+  for (const s of stars) {
+    if (Math.random() < 0.02) { s.x = Math.random(); s.y = Math.random(); }
+    ctx.fillStyle = `hsl(0,0%,${20 + (Math.random() < 0.08 ? 40 : 0)}%)`;
+    ctx.fillText(s.ch, s.x * W, s.y * H);
+  }
+}
+
+// ─── Pet class ──────────────────────────────────────────────────
+class GamePet {
+  constructor(name, charType = 'cat', personality = 'default') {
+    this.name = name;
+    this.charType = charType;
+    this.personality = PERSONALITIES[personality] || PERSONALITIES.default;
+    this.sprites = CHARACTERS[charType] || CHARACTERS.cat;
+    this.x = 0.3 + Math.random() * 0.4;
+    this.y = 0.3 + Math.random() * 0.3;
+    const e = this.personality.energy;
+    this.vx = pick([-0.005, -0.003, 0.003, 0.005]) * e;
+    this.vy = pick([-0.003, 0.003]) * e;
+    this.mood = 'idle'; this.moodTimer = 0;
+    this.frame = 0; this.tick = 0;
+    this.hue = Math.random() * 360; this.hueTimer = 0;
+    this.thought = null; this.thoughtTimer = 0;
+    this.trail = []; this.trailOn = false;
+    this.particles = [];
+    this.rainbow = false;
+    this.gravity = false;
+    this.allThoughts = [...THOUGHTS, ...this.personality.thoughts];
+    // Interaction overrides
+    this.renderScale = 1.0;
+    this.renderOpacity = 1.0;
+    this.speechBubble = null;
+    this.speechBubbleTimer = 0;
+    this.forcedMood = null;
+    this.forcedMoodTimer = 0;
+  }
+
+  pickMood() {
+    if (this.forcedMoodTimer > 0) return; // don't change mood if forced
+    const old = this.mood;
+    this.mood = weightedPick(MOODS, MOOD_WEIGHTS);
+    this.moodTimer = 30 + Math.random() * 90;
+    if (old === 'dance') this.rainbow = false;
+    const e = this.personality.energy;
+    if (this.mood === 'excited') { this.vx = pick([-0.01,-0.007,0.007,0.01]) * e; this.vy = pick([-0.006,0.006]) * e; }
+    else if (this.mood === 'sleepy') { this.vx = 0; this.vy = 0; }
+    else if (this.mood === 'dance') this.rainbow = true;
+    else if (this.mood === 'pounce') { this.vx = pick([-0.014,0.014]) * e; this.vy = pick([-0.007,0.007]) * e; }
+    if (Math.random() < 0.3) this.burst();
+  }
+
+  burst() {
+    for (let i = 0; i < 3 + Math.random() * 5; i++) {
+      this.particles.push({
+        x: this.x + (Math.random() - 0.3) * 0.05,
+        y: this.y + (Math.random() - 0.3) * 0.03,
+        vx: (Math.random() - 0.5) * 0.006,
+        vy: (Math.random() - 0.7) * 0.005,
+        life: 10 + Math.random() * 20,
+        ch: pick(SPARKLE_CHARS),
+        hue: Math.random() * 360,
+      });
+    }
+  }
+
+  setForcedMood(mood, frames) {
+    this.forcedMood = mood;
+    this.forcedMoodTimer = frames;
+    this.mood = mood;
+    if (mood === 'dance') this.rainbow = true;
+  }
+
+  update() {
+    this.tick++;
+    this.moodTimer--;
+    if (this.forcedMoodTimer > 0) {
+      this.forcedMoodTimer--;
+      this.mood = this.forcedMood;
+      if (this.forcedMoodTimer <= 0) {
+        this.forcedMood = null;
+        if (this.mood === 'dance') this.rainbow = false;
+      }
+    } else if (this.moodTimer <= 0) {
+      this.pickMood();
+    }
+
+    // Speech bubble countdown
+    if (this.speechBubbleTimer > 0) {
+      this.speechBubbleTimer--;
+      if (this.speechBubbleTimer <= 0) this.speechBubble = null;
+    }
+
+    this.thoughtTimer--;
+    if (this.thoughtTimer <= 0) {
+      this.thought = Math.random() < 0.3 ? pick(this.allThoughts) : null;
+      this.thoughtTimer = this.thought ? 35 + Math.random() * 50 : 15 + Math.random() * 25;
+    }
+
+    this.hueTimer--;
+    if (this.hueTimer <= 0) {
+      if (this.rainbow) { this.hue = (this.hue + 6) % 360; this.hueTimer = 1; }
+      else { this.hue = Math.random() * 360; this.hueTimer = 20 + Math.random() * 40; }
+    }
+
+    const chaos = this.personality.chaos;
+    if (Math.random() < 0.008 * chaos) this.trailOn = !this.trailOn;
+    if (Math.random() < 0.05 * chaos && this.mood !== 'sleepy') {
+      const e = this.personality.energy;
+      this.vx += (Math.random() - 0.5) * 0.003 * e;
+      this.vy += (Math.random() - 0.5) * 0.002 * e;
+      this.vx = Math.max(-0.014 * e, Math.min(0.014 * e, this.vx));
+      this.vy = Math.max(-0.008 * e, Math.min(0.008 * e, this.vy));
+    }
+    if (Math.random() < 0.003 * chaos) this.gravity = !this.gravity;
+    if (this.gravity && this.mood !== 'sleepy') this.vy = Math.min(0.008, this.vy + 0.0012);
+
+    if (this.trailOn) {
+      this.trail.push({ x: this.x, y: this.y, ch: pick(TRAIL_CHARS), hue: this.hue, life: 30 });
+      if (this.trail.length > 30) this.trail.shift();
+    }
+    this.trail = this.trail.filter(t => { t.life--; return t.life > 0; });
+
+    this.x += this.vx; this.y += this.vy;
+    if (this.x < 0.02) { this.x = 0.02; this.vx = Math.abs(this.vx) || 0.003; this.burst(); }
+    if (this.x > 0.88) { this.x = 0.88; this.vx = -(Math.abs(this.vx) || 0.003); this.burst(); }
+    if (this.y < 0.05) { this.y = 0.05; this.vy = Math.abs(this.vy) || 0.002; }
+    if (this.y > 0.88) { this.y = 0.88; this.vy = this.gravity ? -(0.005 + Math.random() * 0.003) : -(Math.abs(this.vy) || 0.002); }
+
+    this.particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.life--; });
+    this.particles = this.particles.filter(p => p.life > 0);
+
+    const frames = this.sprites[this.mood] || this.sprites.idle;
+    this.frame = (this.frame + 1) % frames.length;
+  }
+
+  draw(isMe) {
+    const frames = this.sprites[this.mood] || this.sprites.idle;
+    const frame = frames[this.frame % frames.length];
+    const px = this.x * W;
+    const py = this.y * H;
+    const scale = this.renderScale;
+
+    // trail (skip if hidden)
+    if (this.renderOpacity > 0.5) {
+      for (const t of this.trail) {
+        ctx.fillStyle = hslColor(t.hue, 60, 50 + (1 - t.life/30) * 30);
+        ctx.globalAlpha = t.life / 30 * this.renderOpacity;
+        ctx.fillText(t.ch, t.x * W, t.y * H);
+      }
+    }
+    ctx.globalAlpha = this.renderOpacity;
+
+    // particles
+    for (const p of this.particles) {
+      ctx.fillStyle = hslColor(p.hue, 80, 70);
+      ctx.globalAlpha = (p.life / 30) * this.renderOpacity;
+      ctx.fillText(p.ch, p.x * W, p.y * H);
+    }
+    ctx.globalAlpha = this.renderOpacity;
+
+    // sprite
+    const cw = CHAR_W * scale;
+    const ch = CHAR_H * scale;
+    const fontSize = 16 * scale;
+    if (scale !== 1.0) ctx.font = `${fontSize}px Courier New`;
+    for (let i = 0; i < frame.length; i++) {
+      const line = frame[i];
+      for (let j = 0; j < line.length; j++) {
+        if (line[j] === ' ') continue;
+        if (this.rainbow) {
+          ctx.fillStyle = hslColor((this.tick * 6 + j * 20 + i * 40) % 360, 90, 65);
+        } else {
+          ctx.fillStyle = hslColor(this.hue, isMe ? 80 : 70, isMe ? 65 : 55);
+        }
+        ctx.fillText(line[j], px + j * cw, py + i * ch);
+      }
+    }
+    if (scale !== 1.0) ctx.font = '16px Courier New';
+
+    // name tag
+    ctx.fillStyle = isMe ? '#fff' : hslColor(this.hue, 70, 55);
+    ctx.fillText(isMe ? `${this.name} (you)` : this.name, px, py - 8);
+
+    // speech bubble (from interactions)
+    if (this.speechBubble) {
+      const msg = this.speechBubble;
+      const maxLen = 30;
+      const displayMsg = msg.length > maxLen ? msg.slice(0, maxLen) + '...' : msg;
+      const bx = px - 2 * CHAR_W;
+      let by = py - CHAR_H * 3;
+      if (by < 20) by = py + (frame.length + 1) * CHAR_H;
+      ctx.globalAlpha = Math.min(1, this.speechBubbleTimer / 20) * this.renderOpacity;
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.fillText(`╭${'─'.repeat(displayMsg.length + 2)}╮`, bx, by);
+      ctx.fillText(`│ ${displayMsg} │`, bx, by + CHAR_H);
+      ctx.fillText(`╰${'─'.repeat(displayMsg.length + 2)}╯`, bx, by + CHAR_H * 2);
+    }
+
+    // thought bubble
+    if (this.thought && !this.speechBubble) {
+      const tx = px + 11 * CHAR_W;
+      let ty = py - CHAR_H * 1.5;
+      if (ty < 20) ty = py + CHAR_H * 5;
+      if (tx + this.thought.length * CHAR_W > W - 40) { ctx.globalAlpha = 1; return; }
+      ctx.fillStyle = 'rgba(200,200,255,0.8)';
+      ctx.fillText(`╭${'─'.repeat(this.thought.length + 2)}╮`, tx, ty);
+      ctx.fillText(`│ ${this.thought} │`, tx, ty + CHAR_H);
+      ctx.fillText(`╰${'─'.repeat(this.thought.length + 2)}╯`, tx, ty + CHAR_H * 2);
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ─── Action Parser ──────────────────────────────────────────────
+const ACTION_DEFS = [
+  { action: 'chase',   keywords: ['chase','follow','stalk','hunt','pursue'] },
+  { action: 'throw',   keywords: ['throw','splash','dump','toss','yeet','launch','shoot'] },
+  { action: 'dance',   keywords: ['dance with','dance battle','dance off','dance'] },
+  { action: 'fight',   keywords: ['fight','punch','kick','slap','bonk','boop','bump','attack','hit'] },
+  { action: 'gift',    keywords: ['gift','give','send'] },
+  { action: 'hide',    keywords: ['hide','sneak','stealth','invisible'] },
+  { action: 'taunt',   keywords: ['say','taunt','tell','shout','yell'] },
+  { action: 'explode', keywords: ['explode','blow up','self destruct'] },
+  { action: 'rain',    keywords: ['rain','storm','weather'] },
+  { action: 'grow',    keywords: ['grow','big','giant','huge'] },
+  { action: 'shrink',  keywords: ['shrink','small','tiny','mini'] },
+];
+
+const EMOJI_WORDS = {
+  'water': '💦', 'snowball': '❄️', 'snow': '❄️', 'fish': '🐟', 'fire': '🔥',
+  'fireball': '🔥', 'heart': '♥', 'love': '♥', 'star': '⭐', 'poop': '💩',
+  'pizza': '🍕', 'bomb': '💣', 'cookie': '🍪', 'rock': '🪨', 'banana': '🍌',
+};
+
+const EMOJI_REGEX = /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FEFF}\u{1F000}-\u{1FFFF}♥♪★⚡]/gu;
+
+function detectEmoji(text, fallback) {
+  // Check for actual emoji characters in text
+  const found = text.match(EMOJI_REGEX);
+  if (found) return found[0];
+  // Check word-to-emoji map
+  const lower = text.toLowerCase();
+  for (const [word, emoji] of Object.entries(EMOJI_WORDS)) {
+    if (lower.includes(word)) return emoji;
+  }
+  return fallback;
+}
+
+function findTargetName(text) {
+  const lower = text.toLowerCase().trim();
+  // Check for "everyone" / "all"
+  if (lower.includes('everyone') || lower === 'all' || lower.includes(' all')) return 'everyone';
+
+  // Match against roster names and friend pets
+  const allNames = new Set();
+  for (const name of Object.values(roster)) allNames.add(name.toLowerCase());
+  for (const fp of Object.values(friendPets)) allNames.add(fp.name.toLowerCase());
+
+  for (const name of allNames) {
+    if (lower.includes(name)) return name;
+  }
+  return null;
+}
+
+function parseAction(text) {
+  const lower = text.toLowerCase().trim();
+  if (!lower) return null;
+
+  for (const def of ACTION_DEFS) {
+    for (const kw of def.keywords) {
+      const idx = lower.indexOf(kw);
+      if (idx === -1) continue;
+      const rest = text.slice(idx + kw.length).trim();
+      const restLower = lower.slice(idx + kw.length).trim();
+
+      switch (def.action) {
+        case 'chase': {
+          const target = findTargetName(rest) || findTargetName(lower);
+          if (!target) continue; // need a target for chase
+          return { action: 'chase', target, params: {}, text };
+        }
+        case 'throw': {
+          const target = findTargetName(rest) || findTargetName(lower);
+          if (!target) continue;
+          const emoji = detectEmoji(text, '💦');
+          return { action: 'throw', target, params: { emoji }, text };
+        }
+        case 'dance': {
+          const target = findTargetName(rest) || findTargetName(lower);
+          return { action: 'dance', target: target || null, params: {}, text };
+        }
+        case 'fight': {
+          const target = findTargetName(rest) || findTargetName(lower);
+          if (!target) continue;
+          return { action: 'fight', target, params: {}, text };
+        }
+        case 'gift': {
+          const target = findTargetName(rest) || findTargetName(lower);
+          if (!target) continue;
+          const emoji = detectEmoji(text, '🎁');
+          return { action: 'gift', target, params: { emoji }, text };
+        }
+        case 'hide':
+          return { action: 'hide', target: null, params: {}, text };
+        case 'taunt': {
+          const target = findTargetName(rest) || findTargetName(lower);
+          // The message is everything after the target name, or just the rest
+          let message = rest;
+          if (target && target !== 'everyone') {
+            const tIdx = rest.toLowerCase().indexOf(target);
+            if (tIdx !== -1) message = rest.slice(tIdx + target.length).trim();
+          }
+          if (!message) message = text;
+          return { action: 'taunt', target: target || null, params: { message }, text };
+        }
+        case 'explode':
+          return { action: 'explode', target: null, params: {}, text };
+        case 'rain': {
+          const emoji = detectEmoji(text, '🌧️');
+          return { action: 'rain', target: null, params: { emoji }, text };
+        }
+        case 'grow':
+          return { action: 'grow', target: null, params: {}, text };
+        case 'shrink':
+          return { action: 'shrink', target: null, params: {}, text };
+      }
+    }
+  }
+
+  // No keyword matched — treat as speech bubble on own pet
+  return { action: 'taunt', target: null, params: { message: text }, text };
+}
+
+// ─── Interaction Manager ────────────────────────────────────────
+const INTERACTION_DURATIONS = {
+  chase: 240,   // 12s at 20fps
+  throw: 60,    // 3s
+  dance: 300,   // 15s
+  fight: 200,   // 10s
+  gift: 100,    // 5s
+  hide: 200,    // 10s
+  taunt: 160,   // 8s
+  explode: 80,  // 4s
+  rain: 200,    // 10s
+  grow: 240,    // 12s
+  shrink: 240,  // 12s
+};
+
+class InteractionManager {
+  constructor() {
+    this.active = [];    // active interactions
+    this.rainParticles = [];
+  }
+
+  add(interaction) {
+    // Remove existing action BY this pet
+    this.active = this.active.filter(i => i.fromId !== interaction.fromId);
+    // Remove existing action targeting same pet (except rain/explode which are area)
+    if (interaction.targetId && interaction.type !== 'rain' && interaction.type !== 'explode') {
+      this.active = this.active.filter(i => i.targetId !== interaction.targetId || i.type === 'rain');
+    }
+    interaction.startTime = Date.now();
+    interaction.elapsed = 0;
+    interaction.duration = INTERACTION_DURATIONS[interaction.type] || 100;
+    interaction.state = {};
+    this.active.push(interaction);
+  }
+
+  update() {
+    for (let i = this.active.length - 1; i >= 0; i--) {
+      const ia = this.active[i];
+      ia.elapsed++;
+      if (ia.elapsed >= ia.duration) {
+        this._cleanup(ia);
+        this.active.splice(i, 1);
+        continue;
+      }
+      this._updateInteraction(ia);
+    }
+
+    // Update rain particles
+    for (let i = this.rainParticles.length - 1; i >= 0; i--) {
+      const p = this.rainParticles[i];
+      p.y += p.vy;
+      p.life--;
+      if (p.life <= 0 || p.y > 1.05) { this.rainParticles.splice(i, 1); }
+    }
+  }
+
+  _cleanup(ia) {
+    const fromPet = this._getPet(ia.fromId);
+    const targetPet = ia.targetId ? this._getPet(ia.targetId) : null;
+
+    switch (ia.type) {
+      case 'hide':
+        if (fromPet) { fromPet.renderOpacity = 1.0; fromPet.trailOn = false; }
+        break;
+      case 'grow':
+      case 'shrink':
+        if (fromPet) fromPet.renderScale = 1.0;
+        break;
+      case 'dance':
+        if (fromPet) fromPet.rainbow = false;
+        if (targetPet) targetPet.rainbow = false;
+        break;
+    }
+  }
+
+  _getPet(id) {
+    if (id === myId) return pet;
+    return friendPets[id] || null;
+  }
+
+  _getPetByName(name) {
+    if (!name) return null;
+    const lower = name.toLowerCase();
+    if (pet && pet.name.toLowerCase() === lower) return pet;
+    for (const fp of Object.values(friendPets)) {
+      if (fp.name.toLowerCase() === lower) return fp;
+    }
+    return null;
+  }
+
+  _getIdByName(name) {
+    if (!name) return null;
+    const lower = name.toLowerCase();
+    if (pet && pet.name.toLowerCase() === lower) return myId;
+    for (const [pid, fp] of Object.entries(friendPets)) {
+      if (fp.name.toLowerCase() === lower) return pid;
+    }
+    // Check roster
+    for (const [pid, n] of Object.entries(roster)) {
+      if (n.toLowerCase() === lower) return pid;
+    }
+    return null;
+  }
+
+  _updateInteraction(ia) {
+    const fromPet = this._getPet(ia.fromId);
+    const targetPet = ia.targetId ? this._getPet(ia.targetId) : null;
+    if (!fromPet && ia.fromId === myId) return;
+
+    switch (ia.type) {
+      case 'chase': {
+        if (!fromPet || !targetPet) return;
+        // Point chaser toward target
+        const dx = targetPet.x - fromPet.x;
+        const dy = targetPet.y - fromPet.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist > 0.03) {
+          fromPet.vx = (dx / dist) * 0.008;
+          fromPet.vy = (dy / dist) * 0.005;
+        }
+        fromPet.setForcedMood('excited', 5);
+        targetPet.setForcedMood('excited', 5);
+        // Dust particles behind chaser
+        if (ia.elapsed % 6 === 0) {
+          fromPet.particles.push({
+            x: fromPet.x - fromPet.vx * 3, y: fromPet.y + 0.02,
+            vx: (Math.random() - 0.5) * 0.002, vy: -0.001,
+            life: 12, ch: pick(['·','~','*']), hue: 40,
+          });
+        }
+        break;
+      }
+
+      case 'throw': {
+        if (!fromPet || !targetPet) return;
+        if (!ia.state.init) {
+          ia.state.init = true;
+          ia.state.projX = fromPet.x;
+          ia.state.projY = fromPet.y;
+          ia.state.startX = fromPet.x;
+          ia.state.startY = fromPet.y;
+          ia.state.hit = false;
+        }
+        const progress = ia.elapsed / ia.duration;
+        const hitTime = 0.6;
+        if (progress < hitTime && !ia.state.hit) {
+          const t = progress / hitTime;
+          ia.state.projX = ia.state.startX + (targetPet.x - ia.state.startX) * t;
+          ia.state.projY = ia.state.startY + (targetPet.y - ia.state.startY) * t - Math.sin(t * Math.PI) * 0.08;
+        } else if (!ia.state.hit) {
+          ia.state.hit = true;
+          // Impact burst
+          for (let i = 0; i < 8; i++) {
+            targetPet.particles.push({
+              x: targetPet.x, y: targetPet.y,
+              vx: (Math.random() - 0.5) * 0.01, vy: (Math.random() - 0.5) * 0.008,
+              life: 15 + Math.random() * 10, ch: ia.params.emoji || '💦', hue: Math.random() * 360,
+            });
+          }
+          // Recoil
+          const dx = targetPet.x - fromPet.x;
+          const dy = targetPet.y - fromPet.y;
+          const dist = Math.sqrt(dx*dx + dy*dy) || 0.1;
+          targetPet.vx += (dx / dist) * 0.006;
+          targetPet.vy += (dy / dist) * 0.004;
+        }
+        break;
+      }
+
+      case 'dance': {
+        if (!fromPet) return;
+        fromPet.setForcedMood('dance', 5);
+        if (targetPet) {
+          targetPet.setForcedMood('dance', 5);
+          // Orbit around midpoint
+          const mx = (fromPet.x + targetPet.x) / 2;
+          const my = (fromPet.y + targetPet.y) / 2;
+          const angle = ia.elapsed * 0.05;
+          const radius = 0.04;
+          fromPet.x += (mx + Math.cos(angle) * radius - fromPet.x) * 0.05;
+          fromPet.y += (my + Math.sin(angle) * radius - fromPet.y) * 0.05;
+          targetPet.x += (mx - Math.cos(angle) * radius - targetPet.x) * 0.05;
+          targetPet.y += (my - Math.sin(angle) * radius - targetPet.y) * 0.05;
+        }
+        // Music note particles
+        if (ia.elapsed % 10 === 0) {
+          const p = targetPet || fromPet;
+          const targets = targetPet ? [fromPet, targetPet] : [fromPet];
+          for (const t of targets) {
+            t.particles.push({
+              x: t.x + (Math.random() - 0.5) * 0.04, y: t.y - 0.01,
+              vx: (Math.random() - 0.5) * 0.002, vy: -0.003,
+              life: 20, ch: pick(['♪','♫','♬']), hue: (ia.elapsed * 8) % 360,
+            });
+          }
+        }
+        break;
+      }
+
+      case 'fight': {
+        if (!fromPet || !targetPet) return;
+        const phase = Math.floor(ia.elapsed / 50) % 4; // 4 phases
+        const subProgress = (ia.elapsed % 50) / 50;
+        if (phase % 2 === 0) {
+          // Rush toward each other
+          const dx = targetPet.x - fromPet.x;
+          const dy = targetPet.y - fromPet.y;
+          fromPet.vx = dx * 0.06;
+          fromPet.vy = dy * 0.06;
+          targetPet.vx = -dx * 0.06;
+          targetPet.vy = -dy * 0.06;
+          // Impact particles at meeting
+          if (subProgress > 0.4 && subProgress < 0.5) {
+            const mx = (fromPet.x + targetPet.x) / 2;
+            const my = (fromPet.y + targetPet.y) / 2;
+            for (let i = 0; i < 6; i++) {
+              fromPet.particles.push({
+                x: mx, y: my,
+                vx: (Math.random() - 0.5) * 0.012, vy: (Math.random() - 0.5) * 0.01,
+                life: 12, ch: pick(['⚡','★','💥','✦','*']), hue: Math.random() * 360,
+              });
+            }
+          }
+        } else {
+          // Bounce away
+          const dx = targetPet.x - fromPet.x;
+          const dy = targetPet.y - fromPet.y;
+          fromPet.vx = -dx * 0.03;
+          fromPet.vy = -dy * 0.03;
+          targetPet.vx = dx * 0.03;
+          targetPet.vy = dy * 0.03;
+        }
+        fromPet.setForcedMood('excited', 5);
+        targetPet.setForcedMood('dizzy', 5);
+        break;
+      }
+
+      case 'gift': {
+        if (!fromPet || !targetPet) return;
+        if (!ia.state.init) {
+          ia.state.init = true;
+          ia.state.projX = fromPet.x;
+          ia.state.projY = fromPet.y;
+          ia.state.delivered = false;
+        }
+        const progress = ia.elapsed / ia.duration;
+        if (progress < 0.5 && !ia.state.delivered) {
+          const t = progress / 0.5;
+          ia.state.projX = fromPet.x + (targetPet.x - fromPet.x) * t;
+          ia.state.projY = fromPet.y + (targetPet.y - fromPet.y) * t - Math.sin(t * Math.PI) * 0.04;
+        } else if (!ia.state.delivered) {
+          ia.state.delivered = true;
+          targetPet.setForcedMood('love', ia.duration - ia.elapsed);
+          // Hearts around target
+          for (let i = 0; i < 5; i++) {
+            targetPet.particles.push({
+              x: targetPet.x + (Math.random() - 0.5) * 0.05,
+              y: targetPet.y - 0.01,
+              vx: (Math.random() - 0.5) * 0.003,
+              vy: -0.003 - Math.random() * 0.002,
+              life: 25, ch: '♥', hue: 340,
+            });
+          }
+        }
+        // Keep spawning hearts after delivery
+        if (ia.state.delivered && ia.elapsed % 12 === 0) {
+          targetPet.particles.push({
+            x: targetPet.x + (Math.random() - 0.5) * 0.04, y: targetPet.y - 0.02,
+            vx: (Math.random() - 0.5) * 0.002, vy: -0.003,
+            life: 18, ch: '♥', hue: 340,
+          });
+        }
+        break;
+      }
+
+      case 'hide': {
+        if (!fromPet) return;
+        fromPet.renderOpacity = 0.3;
+        fromPet.trailOn = false;
+        fromPet.vx *= 0.95;
+        fromPet.vy *= 0.95;
+        // "..." thought bubble
+        fromPet.speechBubble = '...';
+        fromPet.speechBubbleTimer = 5;
+        break;
+      }
+
+      case 'taunt': {
+        const targetP = targetPet || fromPet;
+        if (!targetP) return;
+        targetP.speechBubble = ia.params.message || ia.text || '...';
+        targetP.speechBubbleTimer = 5;
+        break;
+      }
+
+      case 'explode': {
+        if (!fromPet) return;
+        if (!ia.state.init) {
+          ia.state.init = true;
+          ia.state.exploded = false;
+        }
+        if (ia.elapsed === 3) {
+          ia.state.exploded = true;
+          // Big particle burst
+          for (let i = 0; i < 50; i++) {
+            const angle = (i / 50) * Math.PI * 2;
+            const speed = 0.005 + Math.random() * 0.01;
+            fromPet.particles.push({
+              x: fromPet.x, y: fromPet.y,
+              vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+              life: 15 + Math.random() * 15, ch: pick(['💥','⚡','★','✦','*','🔥','·']),
+              hue: Math.random() * 360,
+            });
+          }
+          // Knock back nearby pets
+          const allPets = [pet, ...Object.values(friendPets)];
+          for (const p of allPets) {
+            if (!p || p === fromPet) continue;
+            const dx = p.x - fromPet.x;
+            const dy = p.y - fromPet.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            if (dist < 0.2) {
+              p.vx += (dx / (dist || 0.01)) * 0.015;
+              p.vy += (dy / (dist || 0.01)) * 0.01;
+            }
+          }
+        }
+        // Pet invisible for a bit then reappears
+        if (ia.elapsed > 3 && ia.elapsed < 40) {
+          fromPet.renderOpacity = 0;
+        } else if (ia.elapsed >= 40) {
+          fromPet.renderOpacity = Math.min(1, (ia.elapsed - 40) / 20);
+        }
+        break;
+      }
+
+      case 'rain': {
+        // Spawn particles from top
+        if (ia.elapsed % 3 === 0) {
+          for (let i = 0; i < 3; i++) {
+            this.rainParticles.push({
+              x: Math.random(), y: -0.02,
+              vy: 0.008 + Math.random() * 0.006,
+              ch: ia.params.emoji || '🌧️',
+              life: 80 + Math.random() * 40,
+              hue: 200,
+            });
+          }
+        }
+        break;
+      }
+
+      case 'grow': {
+        if (!fromPet) return;
+        fromPet.renderScale = 1.5;
+        break;
+      }
+
+      case 'shrink': {
+        if (!fromPet) return;
+        fromPet.renderScale = 0.6;
+        break;
+      }
+    }
+  }
+
+  draw() {
+    // Draw throw/gift projectiles
+    for (const ia of this.active) {
+      if ((ia.type === 'throw' || ia.type === 'gift') && ia.state.init) {
+        if (ia.type === 'throw' && ia.state.hit) continue;
+        if (ia.type === 'gift' && ia.state.delivered) continue;
+        const emoji = ia.params.emoji || (ia.type === 'gift' ? '🎁' : '💦');
+        ctx.globalAlpha = 1;
+        ctx.font = '20px Courier New';
+        ctx.fillText(emoji, ia.state.projX * W, ia.state.projY * H);
+        ctx.font = '16px Courier New';
+      }
+    }
+
+    // Draw rain particles
+    for (const p of this.rainParticles) {
+      ctx.globalAlpha = Math.min(1, p.life / 20);
+      ctx.fillText(p.ch, p.x * W, p.y * H);
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+const interactionMgr = new InteractionManager();
+
+// ─── Activity Feed ──────────────────────────────────────────────
+const feedItems = [];
+const feedEl = document.getElementById('activity-feed');
+
+function addFeedItem(text) {
+  feedItems.push({ text, time: Date.now() });
+  if (feedItems.length > 5) feedItems.shift();
+  renderFeed();
+}
+
+function renderFeed() {
+  const now = Date.now();
+  feedEl.innerHTML = feedItems.map((item, i) => {
+    const age = now - item.time;
+    let cls = 'feed-item';
+    if (age > 6000) cls += ' old';
+    else if (age > 3000) cls += ' fading';
+    return `<div class="${cls}">${item.text}</div>`;
+  }).join('');
+}
+
+// Refresh feed styling periodically
+setInterval(renderFeed, 1000);
+
+// ─── Action Input ───────────────────────────────────────────────
+const actionInput = document.getElementById('action-input');
+const PLACEHOLDER_EXAMPLES = [
+  "chase dog",
+  "throw water at bunny",
+  "dance with fox",
+  "yeet pizza at bear",
+  "hide",
+  "say hello to everyone",
+  "bonk robot",
+  "gift heart to ghost",
+  "explode",
+  "rain fish",
+  "grow",
+  "shrink",
+];
+let placeholderIdx = 0;
+let placeholderInterval = null;
+
+function cyclePlaceholder() {
+  placeholderIdx = (placeholderIdx + 1) % PLACEHOLDER_EXAMPLES.length;
+  actionInput.placeholder = PLACEHOLDER_EXAMPLES[placeholderIdx] + '...';
+}
+
+actionInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    const text = actionInput.value.trim();
+    if (!text) return;
+    actionInput.value = '';
+    handleAction(text);
+  }
+});
+
+// Don't let action input steal game focus completely
+actionInput.addEventListener('focus', () => {
+  if (placeholderInterval) clearInterval(placeholderInterval);
+});
+actionInput.addEventListener('blur', () => {
+  placeholderInterval = setInterval(cyclePlaceholder, 3000);
+});
+
+function handleAction(text) {
+  const parsed = parseAction(text);
+  if (!parsed) return;
+
+  // Resolve target ID
+  let targetId = null;
+  let targetName = parsed.target;
+  if (targetName && targetName !== 'everyone') {
+    targetId = interactionMgr._getIdByName(targetName);
+  }
+
+  // If target is "everyone", apply to all
+  if (targetName === 'everyone') {
+    const allIds = Object.keys(peers);
+    // For simplicity, just pick the first peer or do area effect
+    if (allIds.length > 0) {
+      targetId = allIds[0];
+      targetName = roster[targetId] || friendPets[targetId]?.name || 'everyone';
+    }
+  }
+
+  const interaction = {
+    type: parsed.action,
+    fromId: myId,
+    fromName: myName,
+    targetName: targetName,
+    targetId: targetId,
+    params: parsed.params || {},
+    text: text,
+  };
+
+  // Add locally
+  interactionMgr.add(interaction);
+
+  // Build feed text
+  const feedText = buildFeedText(interaction);
+  addFeedItem(feedText);
+
+  // Send via WebSocket
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'action', data: {
+      action: parsed.action,
+      target: targetName,
+      params: parsed.params,
+      text: text,
+    }}));
+    ws.send(JSON.stringify({ type: 'chat', text: feedText }));
+  }
+}
+
+function buildFeedText(ia) {
+  const from = ia.fromName || 'someone';
+  const to = ia.targetName || '';
+  switch (ia.type) {
+    case 'chase': return `${from} is chasing ${to}`;
+    case 'throw': return `${from} throws ${ia.params.emoji || '💦'} at ${to}`;
+    case 'dance': return to ? `${from} dances with ${to} ♪` : `${from} starts dancing ♪`;
+    case 'fight': return `${from} fights ${to}!`;
+    case 'gift': return `${from} gives ${ia.params.emoji || '🎁'} to ${to}`;
+    case 'hide': return `${from} is hiding...`;
+    case 'taunt': return `${from}: "${(ia.params.message || '...').slice(0, 40)}"`;
+    case 'explode': return `${from} EXPLODES! 💥`;
+    case 'rain': return `${from} makes it rain ${ia.params.emoji || '🌧️'}`;
+    case 'grow': return `${from} grows HUGE!`;
+    case 'shrink': return `${from} shrinks tiny...`;
+    default: return `${from} does something`;
+  }
+}
+
+// ─── Network ────────────────────────────────────────────────────
+let ws = null, myId = null, myName = '', myChar = 'cat', myPers = 'default', room = 'default';
+let peers = {}, roster = {}, emotes = [];
+let connected = false;
+
+function getRoom() {
+  return new URLSearchParams(location.search).get('room') || 'default';
+}
+
+function connect() {
+  room = getRoom();
+  myId = Math.random().toString(36).slice(2, 10);
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => {
+    connected = true;
+    ws.send(JSON.stringify({ type: 'join', id: myId, name: myName, room }));
+  };
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'states') peers = msg.peers || {};
+    else if (msg.type === 'roster') roster = msg.players || {};
+    else if (msg.type === 'emote') emotes.push({ from: msg.from, emote: msg.emote, t: Date.now() + 3000 });
+    else if (msg.type === 'action') {
+      // Incoming action from another player
+      const data = msg.data || {};
+      const fromId = msg.from_id || msg.id;
+      const fromName = msg.from_name || msg.from || data.fromName || 'someone';
+      let targetId = null;
+      const targetName = data.target;
+      if (targetName) {
+        targetId = interactionMgr._getIdByName(targetName);
+      }
+      const interaction = {
+        type: data.action,
+        fromId: fromId,
+        fromName: fromName,
+        targetName: targetName,
+        targetId: targetId,
+        params: data.params || {},
+        text: data.text,
+      };
+      interactionMgr.add(interaction);
+      addFeedItem(buildFeedText(interaction));
+    }
+    else if (msg.type === 'chat') {
+      if (msg.text) addFeedItem(msg.text);
+    }
+  };
+  ws.onclose = () => { connected = false; setTimeout(connect, 2000); };
+  ws.onerror = () => ws.close();
+}
+
+function sendState(pet) {
+  if (!ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify({ type: 'state', data: {
+    name: pet.name, x: pet.x, y: pet.y,
+    mood: pet.mood, color: pet.hue, frame: pet.frame,
+    character: pet.charType,
+  }}));
+}
+
+function sendEmote(emote) {
+  if (!ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify({ type: 'emote', emote }));
+}
+
+// ─── Friend rendering ───────────────────────────────────────────
+const friendPets = {};
+function getFriendPet(pid, state) {
+  const charType = state.character || 'cat';
+  if (!friendPets[pid] || friendPets[pid].charType !== charType) {
+    friendPets[pid] = new GamePet(state.name || '???', charType);
+    friendPets[pid].hue = FRIEND_HUES[Object.keys(friendPets).length % FRIEND_HUES.length];
+  }
+  const fp = friendPets[pid];
+  fp.x += (state.x - fp.x) * 0.12;
+  fp.y += (state.y - fp.y) * 0.12;
+  fp.mood = state.mood || 'idle';
+  fp.name = state.name || roster[pid] || '???';
+  fp.frame = state.frame || 0;
+  return fp;
+}
+
+// ─── Main loop ──────────────────────────────────────────────────
+let pet = null;
+let netTick = 0;
+let lastFrame = 0;
+const TARGET_MS = 50; // ~20fps (slower, more chill)
+
+function loop(ts) {
+  if (ts - lastFrame < TARGET_MS) { requestAnimationFrame(loop); return; }
+  lastFrame = ts;
+
+  resize();
+  ctx.clearRect(0, 0, W, H);
+  ctx.font = '16px Courier New';
+  drawStars();
+
+  if (!pet) { requestAnimationFrame(loop); return; }
+
+  // Update interactions before pet update
+  interactionMgr.update();
+
+  pet.update();
+
+  for (const [pid, state] of Object.entries(peers)) {
+    getFriendPet(pid, state).draw(false);
+  }
+  for (const pid of Object.keys(friendPets)) {
+    if (!peers[pid]) delete friendPets[pid];
+  }
+
+  pet.draw(true);
+
+  // Draw interaction effects (projectiles, rain, etc.)
+  interactionMgr.draw();
+
+  // emotes
+  const now = Date.now();
+  emotes = emotes.filter(e => e.t > now);
+  for (let i = 0; i < Math.min(emotes.length, 5); i++) {
+    const e = emotes[emotes.length - 1 - i];
+    ctx.fillStyle = 'rgba(255,255,200,0.9)';
+    ctx.fillText(`${e.from}: ${e.emote}`, W / 2 - 60, 40 + i * 22);
+  }
+
+  netTick++;
+  if (netTick % 4 === 0) sendState(pet);
+
+  const names = Object.values(roster);
+  document.getElementById('hud').textContent =
+    `${pet.charType} · ${pet.mood}${pet.rainbow ? '  🌈' : ''}${pet.gravity ? '  🌍' : ''}${pet.trailOn ? '  ✨' : ''}  ${connected ? '🟢' : '🔴'} ${names.length} online`;
+  document.getElementById('player-list').innerHTML =
+    names.map(n => `<div class="player">${n === myName ? `<b>${n} (you)</b>` : n}</div>`).join('');
+
+  requestAnimationFrame(loop);
+}
+
+// ─── Join screen: character picker ──────────────────────────────
+const charPicker = document.getElementById('char-picker');
+const persPicker = document.getElementById('personality-picker');
+const heroPreview = document.getElementById('hero-preview');
+let selectedChar = 'cat';
+let selectedPers = 'default';
+
+for (const [key, char] of Object.entries(CHARACTERS)) {
+  const el = document.createElement('div');
+  el.className = 'char-option' + (key === 'cat' ? ' selected' : '');
+  el.innerHTML = `<div>${char.preview}</div><div class="char-label">${key}</div>`;
+  el.addEventListener('click', () => {
+    selectedChar = key;
+    charPicker.querySelectorAll('.char-option').forEach(e => e.classList.remove('selected'));
+    el.classList.add('selected');
+    heroPreview.textContent = char.preview;
+  });
+  charPicker.appendChild(el);
+}
+
+for (const [key, pers] of Object.entries(PERSONALITIES)) {
+  const el = document.createElement('div');
+  el.className = 'pers-option' + (key === 'default' ? ' selected' : '');
+  el.textContent = `${key} (${pers.label})`;
+  el.addEventListener('click', () => {
+    selectedPers = key;
+    persPicker.querySelectorAll('.pers-option').forEach(e => e.classList.remove('selected'));
+    el.classList.add('selected');
+  });
+  persPicker.appendChild(el);
+}
+
+document.getElementById('room-info').textContent = `room: ${getRoom()}`;
+
+// ─── Start ──────────────────────────────────────────────────────
+document.getElementById('join-btn').addEventListener('click', startGame);
+document.getElementById('name-input').addEventListener('keydown', e => { if (e.key === 'Enter') startGame(); });
+
+function startGame() {
+  myName = document.getElementById('name-input').value.trim() || selectedChar;
+  myChar = selectedChar;
+  myPers = selectedPers;
+  document.getElementById('join-screen').classList.add('hidden');
+  document.getElementById('emote-bar').style.display = 'flex';
+  document.getElementById('action-bar').style.display = 'block';
+  document.body.style.cursor = 'default';
+  pet = new GamePet(myName, myChar, myPers);
+  connect();
+  // Start placeholder cycling
+  placeholderInterval = setInterval(cyclePlaceholder, 3000);
+}
+
+document.querySelectorAll('#emote-bar button').forEach(btn => {
+  btn.addEventListener('click', () => sendEmote(btn.dataset.emote));
+});
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
