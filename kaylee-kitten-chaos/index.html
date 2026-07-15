@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kaylee's Kitten Chaos</title>
+  <style>
+    :root{
+      --pink:#ff7eb6;
+      --peach:#ffb86b;
+      --yellow:#ffe66d;
+      --mint:#7fffd4;
+      --sky:#76d7ff;
+      --lav:#b9a7ff;
+      --ink:#392f5a;
+      --cream:#fffaf1;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;min-height:100%;font-family: ui-rounded, "SF Pro Rounded", "Comic Sans MS", system-ui, sans-serif;}
+    body{
+      overflow-x:hidden;
+      color:var(--ink);
+      background:
+        radial-gradient(circle at 10% 10%, rgba(255,255,255,.9) 0 5%, transparent 6%),
+        radial-gradient(circle at 80% 20%, rgba(255,255,255,.7) 0 4%, transparent 5%),
+        linear-gradient(135deg,#ffe6f1,#e8f8ff 45%,#fff4d8);
+      background-size:130px 130px,170px 170px,100% 100%;
+    }
+    body.party{
+      animation: rainbow 2.4s linear infinite;
+    }
+    @keyframes rainbow{
+      0%{filter:hue-rotate(0deg)}
+      100%{filter:hue-rotate(360deg)}
+    }
+
+    .cloud{
+      position:fixed;
+      width:150px;height:55px;border-radius:60px;
+      background:rgba(255,255,255,.7);
+      filter:blur(.2px);
+      z-index:0;
+      animation: drift 18s linear infinite;
+      pointer-events:none;
+    }
+    .cloud:before,.cloud:after{
+      content:"";position:absolute;background:inherit;border-radius:50%;
+    }
+    .cloud:before{width:70px;height:70px;left:22px;top:-28px}
+    .cloud:after{width:90px;height:90px;right:18px;top:-42px}
+    .c1{top:10%;left:-180px}
+    .c2{top:50%;left:-220px;animation-delay:-8s;transform:scale(.8)}
+    @keyframes drift{to{transform:translateX(calc(100vw + 400px))}}
+
+    .wrap{
+      position:relative;z-index:2;
+      width:min(1100px,92vw);
+      margin:0 auto;
+      padding:28px 0 70px;
+    }
+    .hero{
+      text-align:center;
+      padding:30px 20px 12px;
+    }
+    .eyebrow{
+      display:inline-block;
+      background:#fff;
+      border:3px solid var(--ink);
+      border-radius:999px;
+      padding:8px 14px;
+      font-weight:900;
+      box-shadow:0 6px 0 rgba(57,47,90,.15);
+      transform:rotate(-2deg);
+    }
+    h1{
+      margin:18px 0 8px;
+      font-size:clamp(3rem,9vw,7.5rem);
+      line-height:.82;
+      letter-spacing:-.07em;
+      text-shadow:0 7px 0 white,0 11px 0 rgba(57,47,90,.16);
+    }
+    .sub{
+      margin:18px auto 0;
+      max-width:700px;
+      font-size:clamp(1rem,2.5vw,1.35rem);
+      font-weight:800;
+    }
+
+    .controls{
+      display:flex;flex-wrap:wrap;justify-content:center;gap:12px;
+      margin:28px 0 24px;
+    }
+    button{
+      appearance:none;border:3px solid var(--ink);
+      border-radius:18px;
+      padding:13px 18px;
+      font:inherit;font-weight:950;color:var(--ink);
+      cursor:pointer;
+      box-shadow:0 7px 0 rgba(57,47,90,.24);
+      transition:.12s transform,.12s box-shadow,.2s filter;
+    }
+    button:hover{filter:brightness(1.06);transform:translateY(-2px)}
+    button:active{transform:translateY(5px);box-shadow:0 2px 0 rgba(57,47,90,.24)}
+    .pink{background:var(--pink)} .yellow{background:var(--yellow)}
+    .mint{background:var(--mint)} .sky{background:var(--sky)}
+
+    .stage{
+      position:relative;
+      min-height:470px;
+      border:4px solid var(--ink);
+      border-radius:36px;
+      overflow:hidden;
+      background:
+        linear-gradient(to bottom,rgba(118,215,255,.45) 0 68%,rgba(127,255,212,.55) 68% 100%);
+      box-shadow:0 14px 0 rgba(57,47,90,.14), inset 0 0 0 9px rgba(255,255,255,.45);
+    }
+    .sun{
+      position:absolute;right:7%;top:8%;width:90px;height:90px;border-radius:50%;
+      background:var(--yellow);border:4px solid var(--ink);
+      box-shadow:0 0 0 11px rgba(255,230,109,.35);
+      animation:pulse 1.7s ease-in-out infinite alternate;
+    }
+    @keyframes pulse{to{transform:scale(1.1) rotate(8deg)}}
+
+    .cat{
+      --fur:#f4a261;
+      --spot:#8d5524;
+      position:absolute;
+      width:120px;height:105px;
+      user-select:none;cursor:pointer;
+      filter:drop-shadow(0 9px 2px rgba(57,47,90,.17));
+      animation:bob 1.7s ease-in-out infinite alternate;
+      transform-origin:50% 100%;
+    }
+    .cat:hover{animation:wiggle .35s ease-in-out infinite alternate}
+    @keyframes bob{to{transform:translateY(-10px) rotate(2deg)}}
+    @keyframes wiggle{to{transform:rotate(7deg) scale(1.06)}}
+    .head{
+      position:absolute;left:14px;top:16px;width:92px;height:79px;
+      background:var(--fur);border:4px solid var(--ink);border-radius:48% 48% 42% 42%;
+    }
+    .ear{
+      position:absolute;top:-17px;width:33px;height:38px;
+      background:var(--fur);border:4px solid var(--ink);
+      transform:rotate(45deg);border-radius:7px 14px 7px 14px;z-index:-1;
+    }
+    .ear.l{left:8px}.ear.r{right:8px}
+    .ear:after{
+      content:"";position:absolute;inset:7px;background:#ff9fbc;border-radius:4px;
+    }
+    .eye{
+      position:absolute;top:28px;width:13px;height:18px;background:var(--ink);border-radius:50%;
+    }
+    .eye.l{left:24px}.eye.r{right:24px}
+    .eye:after{
+      content:"";position:absolute;width:4px;height:5px;background:white;border-radius:50%;left:3px;top:2px;
+    }
+    .nose{
+      position:absolute;left:39px;top:46px;width:14px;height:10px;background:#ff6b9a;
+      clip-path:polygon(0 0,100% 0,50% 100%);
+    }
+    .mouth{
+      position:absolute;left:38px;top:57px;width:17px;height:10px;
+      border-bottom:3px solid var(--ink);border-radius:50%;
+    }
+    .whisker{
+      position:absolute;width:26px;height:2px;background:var(--ink);top:55px;
+    }
+    .w1{left:-20px;transform:rotate(8deg)} .w2{left:-20px;top:64px;transform:rotate(-8deg)}
+    .w3{right:-20px;transform:rotate(-8deg)} .w4{right:-20px;top:64px;transform:rotate(8deg)}
+    .spot{
+      position:absolute;width:30px;height:20px;background:var(--spot);border-radius:50%;
+      left:34px;top:8px;transform:rotate(-12deg);opacity:.75;
+    }
+    .tail{
+      position:absolute;right:-18px;bottom:2px;width:55px;height:55px;border:14px solid var(--fur);
+      border-left-color:transparent;border-bottom-color:transparent;border-radius:50%;
+      transform:rotate(10deg);z-index:-1;
+    }
+    .label{
+      position:absolute;left:50%;top:100%;transform:translate(-50%,-10px);
+      background:#fff;border:3px solid var(--ink);border-radius:999px;
+      white-space:nowrap;padding:5px 10px;font-size:.78rem;font-weight:900;
+    }
+    .boop{
+      animation:boop .55s ease!important;
+    }
+    @keyframes boop{
+      0%{transform:scale(1)}
+      35%{transform:scale(.78) rotate(-9deg)}
+      70%{transform:scale(1.18) rotate(8deg)}
+      100%{transform:scale(1)}
+    }
+
+    .yarn{
+      position:absolute;width:45px;height:45px;border-radius:50%;
+      background:
+       repeating-linear-gradient(35deg,#ff4d8d 0 4px,#ff8fba 4px 8px);
+      border:4px solid var(--ink);cursor:pointer;
+      animation:roll 5s linear infinite alternate;
+    }
+    .yarn:after{
+      content:"";position:absolute;width:80px;height:30px;border-bottom:4px solid var(--ink);
+      border-radius:50%;left:28px;top:22px;transform:rotate(15deg);
+    }
+    @keyframes roll{
+      from{transform:translateX(0) rotate(0)}
+      to{transform:translateX(160px) rotate(520deg)}
+    }
+
+    .panel{
+      margin-top:28px;
+      display:grid;grid-template-columns:1.3fr .7fr;gap:20px;
+    }
+    .card{
+      background:rgba(255,255,255,.88);
+      border:4px solid var(--ink);
+      border-radius:26px;
+      padding:22px;
+      box-shadow:0 10px 0 rgba(57,47,90,.12);
+    }
+    .card h2{margin:0 0 10px;font-size:1.55rem}
+    #fact{font-weight:800;font-size:1.1rem;line-height:1.45}
+    .meter{
+      height:28px;border:3px solid var(--ink);border-radius:999px;overflow:hidden;background:#fff;
+    }
+    .meterFill{
+      width:7%;height:100%;
+      background:linear-gradient(90deg,var(--pink),var(--yellow),var(--mint));
+      transition:width .25s;
+    }
+    .counter{
+      font-size:3rem;font-weight:1000;line-height:1;margin:12px 0 6px;
+    }
+
+    .floaty{
+      position:fixed;z-index:999;pointer-events:none;
+      font-size:34px;
+      animation:floatAway 1.4s ease-out forwards;
+    }
+    @keyframes floatAway{
+      to{transform:translate(var(--dx),-190px) rotate(var(--rot));opacity:0}
+    }
+
+    .tiny-note{
+      text-align:center;margin-top:24px;font-weight:800;opacity:.72;
+    }
+    .toast{
+      position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(120px);
+      background:#fff;border:3px solid var(--ink);border-radius:999px;
+      padding:12px 18px;font-weight:900;z-index:1000;
+      box-shadow:0 8px 0 rgba(57,47,90,.18);
+      transition:.25s;
+    }
+    .toast.show{transform:translateX(-50%) translateY(0)}
+    @media (max-width:760px){
+      .panel{grid-template-columns:1fr}
+      .stage{min-height:590px}
+      .cat{transform:scale(.82)}
+      h1{letter-spacing:-.05em}
+    }
+  </style>
+</head>
+<body>
+  <div class="cloud c1"></div><div class="cloud c2"></div>
+  <main class="wrap">
+    <section class="hero">
+      <div class="eyebrow">🐾 Extremely Serious Internet Content 🐾</div>
+      <h1>Kaylee's<br>Kitten Chaos</h1>
+      <p class="sub">Boop cats. Launch yarn. Cause tiny problems. Become emotionally attached to pixels.</p>
+      <div class="controls">
+        <button class="pink" id="summon">➕ Summon Kitten</button>
+        <button class="yellow" id="dance">🪩 Dance Party</button>
+        <button class="mint" id="purr">〰️ Emergency Purr</button>
+        <button class="sky" id="sound">🔊 Sound: ON</button>
+      </div>
+    </section>
+
+    <section class="stage" id="stage" aria-label="Animated kitten playground">
+      <div class="sun"></div>
+      <div class="yarn" id="yarn" style="left:8%;bottom:12%"></div>
+    </section>
+
+    <section class="panel">
+      <article class="card">
+        <h2>Official Kitten Fact™</h2>
+        <p id="fact">A kitten can detect an unopened snack from seventeen rooms away.</p>
+        <button class="yellow" id="newFact">Give me another “fact”</button>
+      </article>
+      <article class="card">
+        <h2>Global Boop-O-Meter</h2>
+        <div class="counter"><span id="count">0</span> boops</div>
+        <div class="meter"><div class="meterFill" id="meterFill"></div></div>
+        <p id="rank"><strong>Rank:</strong> Suspiciously Unbooped</p>
+      </article>
+    </section>
+
+    <p class="tiny-note">Made for Kaylee with irresponsible levels of kitten technology.</p>
+  </main>
+  <div class="toast" id="toast">meow.exe has started</div>
+
+<script>
+(() => {
+  const stage = document.getElementById('stage');
+  const countEl = document.getElementById('count');
+  const meterFill = document.getElementById('meterFill');
+  const rankEl = document.getElementById('rank');
+  const toast = document.getElementById('toast');
+  let boops = 0, soundOn = true, catNumber = 0, audioCtx = null, purrNode = null;
+
+  const facts = [
+    "A kitten can detect an unopened snack from seventeen rooms away.",
+    "Cats invented gravity so objects could be pushed off tables.",
+    "A group of kittens is called a 'tiny disaster committee.'",
+    "Kittens sleep eighteen hours a day and spend the other six judging your decisions.",
+    "Every cardboard box contains a legally binding invitation for one cat.",
+    "A kitten's natural predator is the vacuum cleaner, followed closely by cucumbers and Mondays.",
+    "Cats can hear a treat bag open through three walls and one active shower.",
+    "The average kitten is 63% fluff, 31% chaos, and 6% mysterious paperwork.",
+    "Purring is how cats quietly recharge their mischief batteries.",
+    "The slow blink is cat language for: 'You may continue living here.'"
+  ];
+
+  const palettes = [
+    ['#f4a261','#8d5524'], ['#f7f0e8','#8d99ae'], ['#393e46','#f8f9fa'],
+    ['#f6bd60','#d97706'], ['#bde0fe','#6d597a'], ['#cdb4db','#7f5539'],
+    ['#ffafcc','#6b705c'], ['#e9c46a','#264653']
+  ];
+  const names = ["Sir Fluffington","Mittens Prime","Captain Beans","Crumb","Chairman Meow",
+    "Princess Screm","Kevin","Toast","Professor Whiskers","Biscuit","Noodle","Pickles"];
+
+  function initAudio(){
+    if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if(audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  function meow(pitch=1){
+    if(!soundOn) return;
+    initAudio();
+    const now = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    const wobble = audioCtx.createOscillator();
+    const wobbleGain = audioCtx.createGain();
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(520*pitch, now);
+    osc.frequency.exponentialRampToValueAtTime(760*pitch, now+.12);
+    osc.frequency.exponentialRampToValueAtTime(390*pitch, now+.48);
+
+    wobble.frequency.value = 11;
+    wobbleGain.gain.value = 18;
+    wobble.connect(wobbleGain).connect(osc.frequency);
+
+    gain.gain.setValueAtTime(.0001, now);
+    gain.gain.exponentialRampToValueAtTime(.18, now+.035);
+    gain.gain.exponentialRampToValueAtTime(.0001, now+.52);
+
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(now); wobble.start(now);
+    osc.stop(now+.55); wobble.stop(now+.55);
+  }
+
+  function chirp(){
+    if(!soundOn) return;
+    initAudio();
+    const now=audioCtx.currentTime;
+    [0, .08, .16].forEach((t,i)=>{
+      const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+      o.type='sine';
+      o.frequency.setValueAtTime(720+i*120,now+t);
+      o.frequency.exponentialRampToValueAtTime(980+i*80,now+t+.08);
+      g.gain.setValueAtTime(.0001,now+t);
+      g.gain.exponentialRampToValueAtTime(.10,now+t+.012);
+      g.gain.exponentialRampToValueAtTime(.0001,now+t+.09);
+      o.connect(g).connect(audioCtx.destination);o.start(now+t);o.stop(now+t+.1);
+    });
+  }
+
+  function purr(duration=2.5){
+    if(!soundOn) return;
+    initAudio();
+    if(purrNode){ try{purrNode.stop()}catch(e){} purrNode=null; }
+    const now=audioCtx.currentTime;
+    const osc=audioCtx.createOscillator(), gain=audioCtx.createGain();
+    const lfo=audioCtx.createOscillator(), lfoGain=audioCtx.createGain();
+    osc.type='sawtooth'; osc.frequency.value=54;
+    lfo.type='sine'; lfo.frequency.value=22; lfoGain.gain.value=.055;
+    gain.gain.value=.045;
+    lfo.connect(lfoGain).connect(gain.gain);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(now);lfo.start(now);osc.stop(now+duration);lfo.stop(now+duration);
+    purrNode=osc;
+  }
+
+  function showToast(text){
+    toast.textContent=text;
+    toast.classList.add('show');
+    clearTimeout(showToast.t);
+    showToast.t=setTimeout(()=>toast.classList.remove('show'),1300);
+  }
+
+  function floatEmoji(x,y,emoji){
+    const e=document.createElement('div');
+    e.className='floaty';
+    e.textContent=emoji;
+    e.style.left=x+'px'; e.style.top=y+'px';
+    e.style.setProperty('--dx', (Math.random()*120-60)+'px');
+    e.style.setProperty('--rot', (Math.random()*100-50)+'deg');
+    document.body.appendChild(e);
+    setTimeout(()=>e.remove(),1500);
+  }
+
+  function rank(){
+    let r='Suspiciously Unbooped';
+    if(boops>=5) r='Junior Booper';
+    if(boops>=15) r='Licensed Nose Technician';
+    if(boops>=30) r='Senior Vice President of Boops';
+    if(boops>=50) r='Supreme Pawthority';
+    if(boops>=75) r='Intergalactic Boop Wizard';
+    rankEl.innerHTML='<strong>Rank:</strong> '+r;
+    meterFill.style.width=Math.min(100,7+boops*1.2)+'%';
+  }
+
+  function createCat(x,y,scale=1){
+    catNumber++;
+    const [fur,spot]=palettes[Math.floor(Math.random()*palettes.length)];
+    const cat=document.createElement('div');
+    cat.className='cat';
+    cat.style.setProperty('--fur',fur);
+    cat.style.setProperty('--spot',spot);
+    cat.style.left=x+'%';cat.style.top=y+'%';
+    cat.style.animationDelay=(-Math.random()*1.6)+'s';
+    cat.style.transform=`scale(${scale})`;
+    const name=names[(catNumber-1)%names.length];
+    cat.innerHTML=`
+      <div class="tail"></div>
+      <div class="head">
+        <div class="ear l"></div><div class="ear r"></div>
+        <div class="spot"></div>
+        <div class="eye l"></div><div class="eye r"></div>
+        <div class="nose"></div><div class="mouth"></div>
+        <div class="whisker w1"></div><div class="whisker w2"></div>
+        <div class="whisker w3"></div><div class="whisker w4"></div>
+      </div>
+      <div class="label">${name}</div>`;
+    cat.addEventListener('click',ev=>{
+      ev.stopPropagation();
+      boops++; countEl.textContent=boops; rank();
+      cat.classList.remove('boop'); void cat.offsetWidth; cat.classList.add('boop');
+      meow(.75+Math.random()*.65);
+      const rect=cat.getBoundingClientRect();
+      ['💖','✨','🐾','💕'][Math.floor(Math.random()*4)];
+      for(let i=0;i<3;i++) floatEmoji(rect.left+rect.width/2,rect.top+30,['💖','✨','🐾','💕'][Math.floor(Math.random()*4)]);
+      if(boops===10) showToast('Achievement unlocked: Extremely Boopy');
+      if(boops===50) showToast('Kaylee has become too powerful');
+    });
+    stage.appendChild(cat);
+    chirp();
+    return cat;
+  }
+
+  [[7,19,1],[34,42,.92],[62,25,1.08],[76,54,.86]].forEach(p=>createCat(...p));
+
+  document.getElementById('summon').addEventListener('click',()=>{
+    const x=4+Math.random()*78, y=12+Math.random()*58;
+    createCat(x,y,.78+Math.random()*.3);
+    showToast('A new tiny employee has arrived');
+  });
+
+  document.getElementById('dance').addEventListener('click',()=>{
+    document.body.classList.toggle('party');
+    const on=document.body.classList.contains('party');
+    document.querySelectorAll('.cat').forEach((c,i)=>{
+      c.style.animationDuration=on?(0.28+(i%4)*.06)+'s':'1.7s';
+    });
+    if(on){
+      chirp(); setTimeout(()=>meow(1.25),220); setTimeout(()=>meow(.85),420);
+      showToast('KITTEN DISCO PROTOCOL ENGAGED');
+    } else showToast('The disco nap has begun');
+  });
+
+  document.getElementById('purr').addEventListener('click',()=>{
+    purr(3.2); showToast('Applying 3.2 seconds of emotional support');
+    for(let i=0;i<8;i++) setTimeout(()=>floatEmoji(innerWidth/2,innerHeight*.65,'💗'),i*90);
+  });
+
+  document.getElementById('sound').addEventListener('click',e=>{
+    soundOn=!soundOn;
+    e.currentTarget.textContent=soundOn?'🔊 Sound: ON':'🔇 Sound: OFF';
+    if(soundOn){meow(1.05);showToast('Tiny speakers have been awakened')}
+    else showToast('Stealth kitten mode');
+  });
+
+  document.getElementById('newFact').addEventListener('click',()=>{
+    const f=facts[Math.floor(Math.random()*facts.length)];
+    document.getElementById('fact').textContent=f;
+    chirp();
+  });
+
+  document.getElementById('yarn').addEventListener('click',e=>{
+    chirp();
+    const y=e.currentTarget;
+    y.style.left=(5+Math.random()*75)+'%';
+    y.style.bottom=(5+Math.random()*35)+'%';
+    showToast('Yarn trajectory: legally questionable');
+  });
+
+  stage.addEventListener('click',e=>{
+    if(e.target===stage){
+      meow(.55);
+      floatEmoji(e.clientX,e.clientY,'🐾');
+    }
+  });
+})();
+</script>
+</body>
+</html>
