@@ -57,13 +57,15 @@ const report = await page.evaluate(async (o) => {
     g.drawImage(cv, 0, 0);
     const d = g.getImageData(0, 0, W, H).data;
     const Y = new Float32Array(W * H), I = new Float32Array(W * H), Q = new Float32Array(W * H);
+    const M = new Float32Array(W * H);          // max channel, for clip detection
     for (let i = 0; i < W * H; i++) {
       const r = d[i * 4] / 255, gg = d[i * 4 + 1] / 255, b = d[i * 4 + 2] / 255;
       Y[i] = 0.299 * r + 0.587 * gg + 0.114 * b;
       I[i] = 0.596 * r - 0.274 * gg - 0.322 * b;
       Q[i] = 0.211 * r - 0.523 * gg + 0.312 * b;
+      M[i] = Math.max(r, gg, b);
     }
-    return { Y, I, Q };
+    return { Y, I, Q, M };
   }
 
   /* Two frames a few fields apart, and a frame captured mid-pan.
@@ -130,60 +132,127 @@ const report = await page.evaluate(async (o) => {
   }
 
   /* ---------------------------------------------------------------------
-     3. CHROMA vs LUMA HORIZONTAL BANDWIDTH.  This is the defining property
-     of the format: VHS luma is ~3MHz, chroma ~0.4MHz, so chroma carries
-     roughly 1/8 the horizontal detail. Measure mean |d/dx| of luma vs chroma,
-     normalised by their own contrast. A shader that just tints the image
-     scores ~1.0 here; the format demands chroma be far smoother.
+     3. CHROMA vs LUMA HORIZONTAL BANDWIDTH — measured in the frequency domain.
+
+     The defining property of the format: luma ~3MHz, chroma ~0.4MHz, so chroma
+     carries roughly 1/8 the horizontal detail.
+
+     Two earlier versions of this check were wrong, and both failures are worth
+     recording because they are easy to repeat:
+       - "gradient normalised by contrast" collapses in a near-monochrome scene,
+         where the tiny chroma-contrast denominator inflates the ratio no matter
+         how band-limited the chroma is;
+       - "correlation length" measures how smooth the SCENE is (these walls are
+         large and flat) rather than what the filter did to it.
+
+     So take the horizontal power spectrum per row and ask what fraction of each
+     channel's own AC energy sits above a cutoff — here, detail finer than 8px.
+     Normalising each channel by its own total energy makes this independent of
+     both contrast and scene content, and it is the same quantity the format
+     actually specifies. Luma must carry real energy up there; chroma must not.
      ------------------------------------------------------------------- */
   {
-    const grad = (a) => {
-      let s = 0, m = 0, n = 0, mean = 0;
-      for (let i = 0; i < a.length; i++) mean += a[i];
-      mean /= a.length;
-      for (let y = 4; y < H - 4; y++)
-        for (let x = 4; x < W - 5; x++) {
-          s += Math.abs(px(a, x + 1, y) - px(a, x, y));
-          m += Math.abs(px(a, x, y) - mean);
-          n++;
+    const N = 512, K = N / 8;          /* K -> wavelengths shorter than 8px */
+    function fft(re, im) {
+      const n = re.length;
+      for (let i = 1, j = 0; i < n; i++) {
+        let bit = n >> 1;
+        for (; j & bit; bit >>= 1) j ^= bit;
+        j ^= bit;
+        if (i < j) { const tr = re[i]; re[i] = re[j]; re[j] = tr; const ti = im[i]; im[i] = im[j]; im[j] = ti; }
+      }
+      for (let len = 2; len <= n; len <<= 1) {
+        const ang = -2 * Math.PI / len;
+        for (let i = 0; i < n; i += len) {
+          for (let k = 0; k < len / 2; k++) {
+            const wr = Math.cos(ang * k), wi = Math.sin(ang * k);
+            const ur = re[i + k], ui = im[i + k];
+            const vr = re[i + k + len / 2] * wr - im[i + k + len / 2] * wi;
+            const vi = re[i + k + len / 2] * wi + im[i + k + len / 2] * wr;
+            re[i + k] = ur + vr; im[i + k] = ui + vi;
+            re[i + k + len / 2] = ur - vr; im[i + k + len / 2] = ui - vi;
+          }
         }
-      return { g: s / n, c: m / n };
+      }
+    }
+    const x0c = Math.floor((W - N) / 2);
+    /* Rows containing clipped pixels are excluded from the "clean" pass.
+       Clipping is non-linear, so where a channel pins at 1.0 the recovered I/Q
+       picks up luma structure that the chroma path never carried — that is a
+       property of the display, not a failure of the bandwidth model, and the
+       two need separating before blaming the shader. */
+    const rowClean = [];
+    for (let y = 8; y < H - 16; y += 3) {
+      let clean = true;
+      for (let i = 0; i < N; i++) if (px(A.M, x0c + i, y) > 0.985) { clean = false; break; }
+      rowClean.push(clean);
+    }
+    out.pctRowsClipped = +(100 * (1 - rowClean.filter(Boolean).length / rowClean.length)).toFixed(1);
+
+    const hfFraction = (a, cleanOnly) => {
+      const x0 = x0c;
+      let hf = 0, tot = 0, ri = -1;
+      for (let y = 8; y < H - 16; y += 3) {
+        ri++;
+        if (cleanOnly && !rowClean[ri]) continue;
+        const re = new Float64Array(N), im = new Float64Array(N);
+        for (let i = 0; i < N; i++) re[i] = px(a, x0 + i, y) * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / N));
+        fft(re, im);
+        for (let k = 1; k < N / 2; k++) {
+          const p = re[k] * re[k] + im[k] * im[k];
+          tot += p;
+          if (k >= K) hf += p;
+        }
+      }
+      return tot > 1e-12 ? hf / tot : null;
     };
-    const gy = grad(A.Y), gi = grad(A.I), gq = grad(A.Q);
-    /* roughness normalised by contrast — how much detail per unit of signal */
-    const ry = gy.g / (gy.c + 1e-6);
-    const rc = (gi.g + gq.g) / (gi.c + gq.c + 1e-6);
-    out.lumaRoughness = +ry.toFixed(4);
-    out.chromaRoughness = +rc.toFixed(4);
-    out.chromaBandwidthRatio = +(rc / (ry + 1e-9)).toFixed(3);
+    const C = new Float32Array(W * H);
+    for (let i = 0; i < W * H; i++) C[i] = Math.hypot(A.I[i], A.Q[i]);
+    const hy = hfFraction(A.Y, false), hc = hfFraction(C, false);
+    out.lumaHfFraction = hy == null ? null : +hy.toFixed(5);
+    out.chromaHfFraction = hc == null ? null : +hc.toFixed(5);
+    /* how many times more fine detail luma carries than chroma */
+    out.chromaBandwidthRatio = (hy && hc) ? +(hy / hc).toFixed(2) : null;
+    const hy2 = hfFraction(A.Y, true), hc2 = hfFraction(C, true);
+    out.chromaBandwidthRatioUnclipped = (hy2 && hc2) ? +(hy2 / hc2).toFixed(2) : null;
   }
 
   /* ---------------------------------------------------------------------
-     4. CHROMA LAG.  Chroma is not merely blurred, it is DELAYED — colour
-     arrives to the right of the luma edge it belongs to. Cross-correlate the
-     luma edge signal against the chroma edge signal at a range of shifts and
-     report the offset with the best match. Real VHS is positive (rightward),
-     typically a few pixels at this resolution.
+     4. CHROMA LAG. Chroma is not merely blurred, it is DELAYED — colour
+     arrives to the right of the luma edge it belongs to.
+
+     Correlate the SIGNED horizontal derivatives, not their magnitudes. With
+     magnitudes, a heavily smeared chroma edge produces a broad symmetric plateau
+     whose argmax lands anywhere; the signed derivative keeps edge direction and
+     gives a sharp, unambiguous peak. I and Q are scored separately and the
+     stronger one wins, because which of them carries an edge depends on hue.
      ------------------------------------------------------------------- */
   {
-    const dY = new Float32Array(W * H), dC = new Float32Array(W * H);
-    for (let y = 4; y < H - 4; y++)
-      for (let x = 4; x < W - 5; x++) {
-        dY[y * W + x] = Math.abs(px(A.Y, x + 1, y) - px(A.Y, x, y));
-        dC[y * W + x] = Math.abs(px(A.I, x + 1, y) - px(A.I, x, y)) + Math.abs(px(A.Q, x + 1, y) - px(A.Q, x, y));
-      }
-    let best = 0, bestScore = -1e9;
-    const scores = {};
-    for (let shift = -10; shift <= 10; shift++) {
-      let s = 0, n = 0;
-      for (let y = 6; y < H - 6; y += 2)
-        for (let x = 14; x < W - 15; x++) {
-          s += dY[y * W + x] * dC[y * W + x + shift]; n++;
+    const deriv = (a) => {
+      const d = new Float32Array(W * H);
+      for (let y = 6; y < H - 14; y++)
+        for (let x = 6; x < W - 7; x++) d[y * W + x] = px(a, x + 1, y) - px(a, x, y);
+      return d;
+    };
+    const dY = deriv(A.Y), dI = deriv(A.I), dQ = deriv(A.Q);
+    let best = 0, bestAbs = -1;
+    const curve = {};
+    for (let shift = -30; shift <= 30; shift++) {
+      let si = 0, sq = 0, n = 0;
+      for (let y = 8; y < H - 16; y += 2)
+        for (let x = 36; x < W - 37; x++) {
+          const g = dY[y * W + x];
+          si += g * dI[y * W + x + shift];
+          sq += g * dQ[y * W + x + shift];
+          n++;
         }
-      s /= n; scores[shift] = s;
-      if (s > bestScore) { bestScore = s; best = shift; }
+      si /= n; sq /= n;
+      const mag = Math.max(Math.abs(si), Math.abs(sq));
+      curve[shift] = +(mag * 1e4).toFixed(2);
+      if (mag > bestAbs) { bestAbs = mag; best = shift; }
     }
     out.chromaLagPx = best;
+    out.chromaLagCurve = curve;
   }
 
   /* ---------------------------------------------------------------------
@@ -310,8 +379,8 @@ const report = await page.evaluate(async (o) => {
     ['noise correlated along scanlines', out.noiseAnisotropy > 1.25,
       `H/V autocorr ratio = ${out.noiseAnisotropy} (want >1.25; white noise = 1.0)`],
     ['noise actually present', out.noiseEnergy > 0.004, `hp energy = ${out.noiseEnergy}`],
-    ['chroma bandwidth far below luma', out.chromaBandwidthRatio < 0.55,
-      `chroma/luma roughness = ${out.chromaBandwidthRatio} (want <0.55; a tint = ~1.0)`],
+    ['chroma bandwidth far below luma', out.chromaBandwidthRatio != null && out.chromaBandwidthRatio > 4.0,
+      `sub-8px energy: luma ${out.lumaHfFraction} vs chroma ${out.chromaHfFraction} = ${out.chromaBandwidthRatio}x more luma detail (want >4; a tint = ~1.0)`],
     ['chroma lags to the right of luma', out.chromaLagPx > 0,
       `best chroma offset = ${out.chromaLagPx}px (want positive)`],
     ['scanline / interlace structure present', out.scanlineRatio > 1.05,

@@ -46,9 +46,70 @@ VB.def('player', function (VB, THREE) {
   }
 
   /* Pointer lock is not always available — an embedded/sandboxed frame can
-     refuse it outright. Rather than leaving the player unable to look around,
-     fall back to drag-to-look, which needs no permission at all. */
+     refuse it outright, and a phone has no such concept at all. Rather than
+     leaving the player unable to look around, fall back to drag-to-look, which
+     needs no permission at all. */
   let dragging = false, dragX = 0, dragY = 0;
+
+  /* ------------------------------------------------------------ touch
+     A phone has no keyboard and no mouse, so the screen is split: the left
+     third is a thumb stick for walking, anything else is drag-to-look. Both are
+     tracked by pointerId so two thumbs work at once, which is the whole point —
+     looking while walking is not optional in a first-person piece. Push the
+     stick to the end of its travel to run; a tap that never moved is interact. */
+  const STICK_R = 74;                       // px of travel for full speed
+  let moveId = -1, lookId = -1;
+  let stickOX = 0, stickOY = 0;             // where the thumb landed
+  let touchIX = 0, touchIZ = 0, touchRun = 0;
+  let lookLastX = 0, lookLastY = 0;
+  let tapStart = 0, tapMoved = 0;
+
+  function isTouch(e) { return e.pointerType === 'touch' || e.pointerType === 'pen'; }
+
+  function touchDown(e) {
+    const stickZone = window.innerWidth * 0.36;
+    if (e.clientX < stickZone && moveId < 0) {
+      moveId = e.pointerId; stickOX = e.clientX; stickOY = e.clientY;
+      touchIX = touchIZ = 0;
+    } else if (lookId < 0) {
+      lookId = e.pointerId; lookLastX = e.clientX; lookLastY = e.clientY;
+      tapStart = S.t; tapMoved = 0;
+    }
+  }
+  function touchMove(e) {
+    if (e.pointerId === moveId) {
+      const dx = e.clientX - stickOX, dy = e.clientY - stickOY;
+      const len = Math.hypot(dx, dy);
+      const k = Math.min(1, len / STICK_R);
+      if (len > 1) { touchIX = (dx / len) * k; touchIZ = (dy / len) * k; }
+      else { touchIX = touchIZ = 0; }
+      touchRun = k > 0.92 ? 1 : 0;
+    } else if (e.pointerId === lookId) {
+      /* Slower than the mouse: a thumb has far less travel, and a twitchy look
+         would break the tired-operator feel the camera is built on. */
+      const sens = 0.0042;
+      wantYaw -= (e.clientX - lookLastX) * sens;
+      wantPitch -= (e.clientY - lookLastY) * sens;
+      wantPitch = VB.clamp(wantPitch, -1.15, 1.15);
+      tapMoved += Math.abs(e.clientX - lookLastX) + Math.abs(e.clientY - lookLastY);
+      lookLastX = e.clientX; lookLastY = e.clientY;
+    }
+  }
+  function touchUp(e) {
+    if (e.pointerId === moveId) { moveId = -1; touchIX = touchIZ = 0; touchRun = 0; }
+    else if (e.pointerId === lookId) {
+      if (S.t - tapStart < 0.35 && tapMoved < 14) interact();
+      lookId = -1;
+    }
+  }
+
+  /* Dismiss the plate and unlock audio. Split out from requestLock so touch can
+     start the game without asking for a pointer lock it will never be granted. */
+  function startGame() {
+    const plate = document.getElementById('plate');
+    if (plate) plate.classList.add('gone');
+    VB.start();
+  }
 
   function requestLock() {
     const el = document.getElementById('hit');
@@ -56,12 +117,11 @@ VB.def('player', function (VB, THREE) {
       const r = el.requestPointerLock();
       if (r && r.catch) r.catch(() => { /* fallback path handles it */ });
     }
-    const plate = document.getElementById('plate');
-    if (plate) plate.classList.add('gone');
-    VB.start();
+    startGame();
   }
 
   function onDown(e) {
+    if (isTouch(e)) { startGame(); touchDown(e); return; }
     requestLock();
     dragging = true; dragX = e.clientX; dragY = e.clientY;
   }
@@ -77,9 +137,15 @@ VB.def('player', function (VB, THREE) {
   return {
     init() {
       const hit = document.getElementById('hit');
-      hit.addEventListener('mousedown', onDown);
-      window.addEventListener('mouseup', () => { dragging = false; });
-      window.addEventListener('mousemove', onDrag);
+      hit.addEventListener('pointerdown', onDown);
+      window.addEventListener('pointermove', e => { if (isTouch(e)) touchMove(e); else onDrag(e); });
+      window.addEventListener('pointerup', e => { if (isTouch(e)) touchUp(e); else dragging = false; });
+      window.addEventListener('pointercancel', touchUp);
+      /* Stop the browser turning a two-thumb drag into a pan or a page zoom. */
+      hit.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
+      hit.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+      window.addEventListener('orientationchange',
+        () => setTimeout(() => window.dispatchEvent(new Event('resize')), 120));
       document.addEventListener('pointerlockchange', () => {
         locked = document.pointerLockElement === document.getElementById('hit');
       });
@@ -88,6 +154,11 @@ VB.def('player', function (VB, THREE) {
       window.addEventListener('keyup', e => onKey(e, false));
       window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
       VB.on('player:teleport', () => { vel.set(0, 0, 0); wantYaw = S.yaw; });
+      /* Tell a phone what a phone can actually do. */
+      if (navigator.maxTouchPoints > 0) {
+        const ctl = document.getElementById('ctl');
+        if (ctl) ctl.innerHTML = 'LEFT THUMB WALK &nbsp;&middot;&nbsp; DRAG TO LOOK &nbsp;&middot;&nbsp; PUSH FAR TO RUN &nbsp;&middot;&nbsp; TAP TO INTERACT';
+      }
       VB.player = {
         get locked() { return locked; },
         get flashOn() { return flashOn; },
@@ -117,14 +188,21 @@ VB.def('player', function (VB, THREE) {
       S.turn = VB.approach(S.turn, rawTurn, rawTurn > S.turn ? 26 : 5.5, dt);
 
       /* --------------------------------------------------------- drive */
-      const run = !!keys.ShiftLeft && stamina > 0.06;
+      const run = (!!keys.ShiftLeft || touchRun > 0) && stamina > 0.06;
       let ix = 0, iz = 0;
       if (keys.KeyW || keys.ArrowUp) iz -= 1;
       if (keys.KeyS || keys.ArrowDown) iz += 1;
       if (keys.KeyA || keys.ArrowLeft) ix -= 1;
       if (keys.KeyD || keys.ArrowRight) ix += 1;
-      const inLen = Math.hypot(ix, iz);
+      let inLen = Math.hypot(ix, iz);
       if (inLen > 0) { ix /= inLen; iz /= inLen; }
+      /* The thumb stick is analog, so it REPLACES the normalised key vector
+         rather than adding to it — otherwise a half-pushed stick walks at full
+         speed and the stick may as well be a button. */
+      if (moveId >= 0 && (touchIX || touchIZ)) {
+        ix = touchIX; iz = touchIZ;
+        inLen = Math.min(1, Math.hypot(ix, iz));
+      }
 
       const speed = run ? cfg.runSpeed : cfg.walkSpeed;
       fwd.set(-Math.sin(S.yaw), 0, -Math.cos(S.yaw));

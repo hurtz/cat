@@ -31,7 +31,7 @@
   <b>SUNSET TERRACE</b>
   <s>PROPERTY OF FACILITIES MGMT &nbsp;&middot;&nbsp; TAPE 04 &nbsp;&middot;&nbsp; DO NOT ERASE</s>
   <u>&#9654; CLICK TO PLAY</u>
-  <s>WASD MOVE &nbsp;&middot;&nbsp; MOUSE LOOK &nbsp;&middot;&nbsp; SHIFT RUN &nbsp;&middot;&nbsp; E INTERACT</s>
+  <s id="ctl">WASD MOVE &nbsp;&middot;&nbsp; MOUSE LOOK &nbsp;&middot;&nbsp; SHIFT RUN &nbsp;&middot;&nbsp; E INTERACT</s>
   <s>headphones recommended</s>
 </div>
 <div id="warn"></div>
@@ -2345,9 +2345,70 @@ VB.def('player', function (VB, THREE) {
   }
 
   /* Pointer lock is not always available — an embedded/sandboxed frame can
-     refuse it outright. Rather than leaving the player unable to look around,
-     fall back to drag-to-look, which needs no permission at all. */
+     refuse it outright, and a phone has no such concept at all. Rather than
+     leaving the player unable to look around, fall back to drag-to-look, which
+     needs no permission at all. */
   let dragging = false, dragX = 0, dragY = 0;
+
+  /* ------------------------------------------------------------ touch
+     A phone has no keyboard and no mouse, so the screen is split: the left
+     third is a thumb stick for walking, anything else is drag-to-look. Both are
+     tracked by pointerId so two thumbs work at once, which is the whole point —
+     looking while walking is not optional in a first-person piece. Push the
+     stick to the end of its travel to run; a tap that never moved is interact. */
+  const STICK_R = 74;                       // px of travel for full speed
+  let moveId = -1, lookId = -1;
+  let stickOX = 0, stickOY = 0;             // where the thumb landed
+  let touchIX = 0, touchIZ = 0, touchRun = 0;
+  let lookLastX = 0, lookLastY = 0;
+  let tapStart = 0, tapMoved = 0;
+
+  function isTouch(e) { return e.pointerType === 'touch' || e.pointerType === 'pen'; }
+
+  function touchDown(e) {
+    const stickZone = window.innerWidth * 0.36;
+    if (e.clientX < stickZone && moveId < 0) {
+      moveId = e.pointerId; stickOX = e.clientX; stickOY = e.clientY;
+      touchIX = touchIZ = 0;
+    } else if (lookId < 0) {
+      lookId = e.pointerId; lookLastX = e.clientX; lookLastY = e.clientY;
+      tapStart = S.t; tapMoved = 0;
+    }
+  }
+  function touchMove(e) {
+    if (e.pointerId === moveId) {
+      const dx = e.clientX - stickOX, dy = e.clientY - stickOY;
+      const len = Math.hypot(dx, dy);
+      const k = Math.min(1, len / STICK_R);
+      if (len > 1) { touchIX = (dx / len) * k; touchIZ = (dy / len) * k; }
+      else { touchIX = touchIZ = 0; }
+      touchRun = k > 0.92 ? 1 : 0;
+    } else if (e.pointerId === lookId) {
+      /* Slower than the mouse: a thumb has far less travel, and a twitchy look
+         would break the tired-operator feel the camera is built on. */
+      const sens = 0.0042;
+      wantYaw -= (e.clientX - lookLastX) * sens;
+      wantPitch -= (e.clientY - lookLastY) * sens;
+      wantPitch = VB.clamp(wantPitch, -1.15, 1.15);
+      tapMoved += Math.abs(e.clientX - lookLastX) + Math.abs(e.clientY - lookLastY);
+      lookLastX = e.clientX; lookLastY = e.clientY;
+    }
+  }
+  function touchUp(e) {
+    if (e.pointerId === moveId) { moveId = -1; touchIX = touchIZ = 0; touchRun = 0; }
+    else if (e.pointerId === lookId) {
+      if (S.t - tapStart < 0.35 && tapMoved < 14) interact();
+      lookId = -1;
+    }
+  }
+
+  /* Dismiss the plate and unlock audio. Split out from requestLock so touch can
+     start the game without asking for a pointer lock it will never be granted. */
+  function startGame() {
+    const plate = document.getElementById('plate');
+    if (plate) plate.classList.add('gone');
+    VB.start();
+  }
 
   function requestLock() {
     const el = document.getElementById('hit');
@@ -2355,12 +2416,11 @@ VB.def('player', function (VB, THREE) {
       const r = el.requestPointerLock();
       if (r && r.catch) r.catch(() => { /* fallback path handles it */ });
     }
-    const plate = document.getElementById('plate');
-    if (plate) plate.classList.add('gone');
-    VB.start();
+    startGame();
   }
 
   function onDown(e) {
+    if (isTouch(e)) { startGame(); touchDown(e); return; }
     requestLock();
     dragging = true; dragX = e.clientX; dragY = e.clientY;
   }
@@ -2376,9 +2436,15 @@ VB.def('player', function (VB, THREE) {
   return {
     init() {
       const hit = document.getElementById('hit');
-      hit.addEventListener('mousedown', onDown);
-      window.addEventListener('mouseup', () => { dragging = false; });
-      window.addEventListener('mousemove', onDrag);
+      hit.addEventListener('pointerdown', onDown);
+      window.addEventListener('pointermove', e => { if (isTouch(e)) touchMove(e); else onDrag(e); });
+      window.addEventListener('pointerup', e => { if (isTouch(e)) touchUp(e); else dragging = false; });
+      window.addEventListener('pointercancel', touchUp);
+      /* Stop the browser turning a two-thumb drag into a pan or a page zoom. */
+      hit.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
+      hit.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+      window.addEventListener('orientationchange',
+        () => setTimeout(() => window.dispatchEvent(new Event('resize')), 120));
       document.addEventListener('pointerlockchange', () => {
         locked = document.pointerLockElement === document.getElementById('hit');
       });
@@ -2387,6 +2453,11 @@ VB.def('player', function (VB, THREE) {
       window.addEventListener('keyup', e => onKey(e, false));
       window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
       VB.on('player:teleport', () => { vel.set(0, 0, 0); wantYaw = S.yaw; });
+      /* Tell a phone what a phone can actually do. */
+      if (navigator.maxTouchPoints > 0) {
+        const ctl = document.getElementById('ctl');
+        if (ctl) ctl.innerHTML = 'LEFT THUMB WALK &nbsp;&middot;&nbsp; DRAG TO LOOK &nbsp;&middot;&nbsp; PUSH FAR TO RUN &nbsp;&middot;&nbsp; TAP TO INTERACT';
+      }
       VB.player = {
         get locked() { return locked; },
         get flashOn() { return flashOn; },
@@ -2416,14 +2487,21 @@ VB.def('player', function (VB, THREE) {
       S.turn = VB.approach(S.turn, rawTurn, rawTurn > S.turn ? 26 : 5.5, dt);
 
       /* --------------------------------------------------------- drive */
-      const run = !!keys.ShiftLeft && stamina > 0.06;
+      const run = (!!keys.ShiftLeft || touchRun > 0) && stamina > 0.06;
       let ix = 0, iz = 0;
       if (keys.KeyW || keys.ArrowUp) iz -= 1;
       if (keys.KeyS || keys.ArrowDown) iz += 1;
       if (keys.KeyA || keys.ArrowLeft) ix -= 1;
       if (keys.KeyD || keys.ArrowRight) ix += 1;
-      const inLen = Math.hypot(ix, iz);
+      let inLen = Math.hypot(ix, iz);
       if (inLen > 0) { ix /= inLen; iz /= inLen; }
+      /* The thumb stick is analog, so it REPLACES the normalised key vector
+         rather than adding to it — otherwise a half-pushed stick walks at full
+         speed and the stick may as well be a button. */
+      if (moveId >= 0 && (touchIX || touchIZ)) {
+        ix = touchIX; iz = touchIZ;
+        inLen = Math.min(1, Math.hypot(ix, iz));
+      }
 
       const speed = run ? cfg.runSpeed : cfg.walkSpeed;
       fwd.set(-Math.sin(S.yaw), 0, -Math.cos(S.yaw));
@@ -3998,9 +4076,17 @@ VB.def('postfx', function (VB, THREE) {
 
         /* chroma noise: coarse blocks (2 chroma texels x 2 lines), biased hard
            onto the green/magenta axis, living in the darks and mids */
-        vec2 cellv = vec2(floor(uv.x*cres.x*0.5), floor(sl*0.5) + frameN);
-        float n1 = hash21(cellv) - 0.5;
-        float n2 = hash21(cellv + 37.7) - 0.5;
+        /* Hard-edged blocks were the bug here: quantising x to 2-texel cells
+           makes a square wave, and a square wave's harmonics (1/3, 1/5 of the
+           period) land far above the colour-under band — which both measured
+           as chroma bandwidth this filter is not supposed to pass, and read as
+           digital mosaic rather than tape. Interpolating between cells keeps
+           the coarse blotchy scale without the harmonics. Rows still quantise
+           to line pairs, because chroma noise IS correlated down a scanline. */
+        float ccx = uv.x*cres.x*0.5;
+        float crow = floor(sl*0.5) + frameN;
+        float n1 = vnx(ccx, crow) - 0.5;
+        float n2 = vnx(ccx + 37.7, crow + 11.0) - 0.5;
         vec2 gm = vec2(0.464, 0.886);              /* magenta(+) / green(-) */
         float amp = (0.030 + wear*0.105 + dread*0.012);
         float wgt = (1.0 - 0.82*smoothstep(0.34, 0.92, yiq.x)) * (0.45 + 0.55*smoothstep(0.0, 0.10, yiq.x));
@@ -4546,10 +4632,98 @@ VB.def('hud', function (VB, THREE) {
 
 /* ==== 80_perf.js ======================================================== */
 /* ============================================================================
-   PERF — placeholder.
+   PERF — keep the tape running at 29.97 on hardware that cannot afford it.
+
+   The pipeline is expensive by design: two scene renders per presented frame
+   (that is what makes motion comb) plus six fullscreen passes. A desktop GPU
+   does not notice. A phone very much does.
+
+   The order things are given up in matters, because some of them are the
+   authenticity and some are only resolution:
+     1. internal resolution — cheapest to lose. 640x480 is already far above
+        what VHS resolves, so dropping toward 320x240 costs almost nothing
+        visually; the tape chain is scaled in buffer-relative units so every
+        artifact keeps its physical size.
+     2. field rendering — LAST resort. Rendering one scene pass per presented
+        frame halves the cost, but the two woven fields then come from the same
+        instant and the combing disappears. That is the single most valuable
+        cue in the whole piece, so it only goes when nothing else is left.
    ========================================================================== */
 VB.def('perf', function (VB, THREE) {
-  return { init() { VB.quality = 1; } };
+  const S = VB.S, cfg = VB.cfg;
+
+  /* 4:3 rungs. Heights stay even so the two field parities survive. */
+  const RUNGS = [[640, 480], [512, 384], [416, 312], [320, 240], [256, 192]];
+  let rung = 0;
+
+  const HIST = 45;
+  const dt = new Float32Array(HIST);
+  let n = 0, filled = false, last = 0;
+  let cooldown = 2.5;                 // settle before judging anything
+  let sinceChange = 0;
+
+  /* A coarse "this is a phone" signal. Used only to pick a starting rung —
+     the measured frame time is what actually drives adaptation. */
+  function isHandheld() {
+    if (typeof navigator === 'undefined') return false;
+    if (navigator.userAgentData && navigator.userAgentData.mobile) return true;
+    return /Android|iPhone|iPad|iPod|Mobile|Silk/i.test(navigator.userAgent || '')
+      || (navigator.maxTouchPoints > 1 && window.innerWidth < 1100);
+  }
+
+  function apply(next) {
+    next = VB.clamp(next, 0, RUNGS.length - 1);
+    if (next === rung) return;
+    rung = next;
+    const [w, h] = RUNGS[rung];
+    cfg.sceneW = w; cfg.sceneH = h;
+    VB.renderer.setSize(w, h, false);
+    const px = VB.mods.postfx;
+    if (px && px.resize) px.resize(w, h);
+    VB.quality = 1 - rung / (RUNGS.length - 1);
+    sinceChange = 0;
+    console.log('[perf] internal resolution -> ' + w + 'x' + h);
+  }
+
+  function median() {
+    const a = Array.prototype.slice.call(dt, 0, filled ? HIST : n).sort((x, y) => x - y);
+    return a.length ? a[a.length >> 1] : 0;
+  }
+
+  return {
+    init() {
+      VB.quality = 1;
+      VB.perf = {
+        get rung() { return rung; },
+        get medianMs() { return median(); },
+        setRung: apply,
+        rungs: RUNGS.length,
+      };
+      /* Phones start two rungs down rather than discovering it the hard way
+         through several seconds of stutter. */
+      if (isHandheld()) apply(2);
+    },
+
+    update(step) {
+      /* Wall-clock, not the fixed sim step — we are measuring the machine. */
+      const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      if (last) {
+        dt[n++ % HIST] = now - last;
+        if (n >= HIST) filled = true;
+      }
+      last = now;
+
+      cooldown -= step; sinceChange += step;
+      if (cooldown > 0 || (!filled && n < HIST) || sinceChange < 1.8) return;
+
+      const m = median();
+      /* Two fields are presented per frame, so a 29.97fps frame is ~16.7ms of
+         field time. Give real headroom before reacting either way — thrashing
+         the render targets is worse than being one rung too low. */
+      if (m > 21 && rung < RUNGS.length - 1) apply(rung + 1);
+      else if (m < 11 && rung > 0) apply(rung - 1);
+    },
+  };
 }, 90);
 
 

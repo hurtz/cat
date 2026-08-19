@@ -224,9 +224,17 @@ VB.def('postfx', function (VB, THREE) {
 
         /* chroma noise: coarse blocks (2 chroma texels x 2 lines), biased hard
            onto the green/magenta axis, living in the darks and mids */
-        vec2 cellv = vec2(floor(uv.x*cres.x*0.5), floor(sl*0.5) + frameN);
-        float n1 = hash21(cellv) - 0.5;
-        float n2 = hash21(cellv + 37.7) - 0.5;
+        /* Hard-edged blocks were the bug here: quantising x to 2-texel cells
+           makes a square wave, and a square wave's harmonics (1/3, 1/5 of the
+           period) land far above the colour-under band — which both measured
+           as chroma bandwidth this filter is not supposed to pass, and read as
+           digital mosaic rather than tape. Interpolating between cells keeps
+           the coarse blotchy scale without the harmonics. Rows still quantise
+           to line pairs, because chroma noise IS correlated down a scanline. */
+        float ccx = uv.x*cres.x*0.5;
+        float crow = floor(sl*0.5) + frameN;
+        float n1 = vnx(ccx, crow) - 0.5;
+        float n2 = vnx(ccx + 37.7, crow + 11.0) - 0.5;
         vec2 gm = vec2(0.464, 0.886);              /* magenta(+) / green(-) */
         float amp = (0.030 + wear*0.105 + dread*0.012);
         float wgt = (1.0 - 0.82*smoothstep(0.34, 0.92, yiq.x)) * (0.45 + 0.55*smoothstep(0.0, 0.10, yiq.x));

@@ -72,7 +72,7 @@ const html = `<!doctype html>
   <b>SUNSET TERRACE</b>
   <s>PROPERTY OF FACILITIES MGMT &nbsp;&middot;&nbsp; TAPE 04 &nbsp;&middot;&nbsp; DO NOT ERASE</s>
   <u>&#9654; CLICK TO PLAY</u>
-  <s>WASD MOVE &nbsp;&middot;&nbsp; MOUSE LOOK &nbsp;&middot;&nbsp; SHIFT RUN &nbsp;&middot;&nbsp; E INTERACT</s>
+  <s id="ctl">WASD MOVE &nbsp;&middot;&nbsp; MOUSE LOOK &nbsp;&middot;&nbsp; SHIFT RUN &nbsp;&middot;&nbsp; E INTERACT</s>
   <s>headphones recommended</s>
 </div>
 <div id="warn"></div>
