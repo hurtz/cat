@@ -253,21 +253,41 @@ const report = await page.evaluate(async (o) => {
   }
 
   /* ---------------------------------------------------------------------
-     8. INTERLACE COMBING UNDER MOTION.  During a pan, odd and even lines
-     come from different moments, so line-to-line difference should rise
-     sharply versus a static frame. This is what makes motion read as video
-     rather than as a game running at 60fps.
+     8. INTERLACE COMBING UNDER MOTION.  Naive line-to-line difference does
+     NOT measure this: the display pass modulates every other line, and that
+     constant scanline pattern swamps the combing signal entirely.
+
+     So separate the two parities into their own half-height images, normalise
+     each to zero mean and unit variance (which removes exactly the per-parity
+     brightness offset that scanlines impose, and nothing else), and compare
+     what is left. On a static frame the two fields show the same world and
+     agree; during a pan they were sampled 1/59.94s apart and disagree.
      ------------------------------------------------------------------- */
   {
-    const lineDiff = (F) => {
+    const parityMismatch = (F) => {
+      const h2 = (H >> 1) - 2;
+      const E = new Float64Array(W * h2), O = new Float64Array(W * h2);
+      for (let r = 0; r < h2; r++)
+        for (let x = 0; x < W; x++) {
+          E[r * W + x] = px(F.Y, x, r * 2);
+          O[r * W + x] = px(F.Y, x, r * 2 + 1);
+        }
+      const norm = (a) => {
+        let m = 0; for (let i = 0; i < a.length; i++) m += a[i]; m /= a.length;
+        let v = 0; for (let i = 0; i < a.length; i++) v += (a[i] - m) * (a[i] - m);
+        v = Math.sqrt(v / a.length) || 1e-6;
+        for (let i = 0; i < a.length; i++) a[i] = (a[i] - m) / v;
+      };
+      norm(E); norm(O);
       let d = 0, n = 0;
-      for (let y = 6; y < H - 8; y++)
-        for (let x = 8; x < W - 8; x += 3) { d += Math.abs(px(F.Y, x, y) - px(F.Y, x, y + 1)); n++; }
+      /* skip the head-switch band, which is torn on every frame regardless */
+      for (let r = 2; r < h2 - 8; r++)
+        for (let x = 8; x < W - 8; x++) { d += Math.abs(E[r * W + x] - O[r * W + x]); n++; }
       return d / n;
     };
-    const stat = lineDiff(A), pan = lineDiff(PAN);
-    out.staticLineDiff = +stat.toFixed(4);
-    out.panningLineDiff = +pan.toFixed(4);
+    const stat = parityMismatch(A), pan = parityMismatch(PAN);
+    out.staticParityMismatch = +stat.toFixed(4);
+    out.panningParityMismatch = +pan.toFixed(4);
     out.combingGain = +(pan / (stat + 1e-9)).toFixed(3);
   }
 
@@ -301,7 +321,7 @@ const report = await page.evaluate(async (o) => {
     ['edge overshoot / ringing present', out.overshoot != null && out.overshoot > 0.03,
       `post-edge overshoot = ${out.overshoot} (want >0.03; pure blur = ~0)`],
     ['combing increases under motion', out.combingGain > 1.15,
-      `panning/static line diff = ${out.combingGain}x (want >1.15)`],
+      `parity mismatch panning/static = ${out.combingGain}x (want >1.15)`],
     ['image is never frozen', out.frameToFrameDelta > 0.0015,
       `mean |frame delta| = ${out.frameToFrameDelta}`],
     /* A lit office has to actually reach near-white somewhere. If the 99.5th
