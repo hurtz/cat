@@ -2,3 +2,6 @@
 __pycache__/
 *.pyc
 .vercel/
+
+# agent worktrees / local harness state
+.claude/
