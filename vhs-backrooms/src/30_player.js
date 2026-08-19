@@ -45,16 +45,41 @@ VB.def('player', function (VB, THREE) {
     VB.emit('player:interact', { hit: isFinite(d) ? d : null, pos: S.pos.clone(), dir: fwd.clone() });
   }
 
+  /* Pointer lock is not always available — an embedded/sandboxed frame can
+     refuse it outright. Rather than leaving the player unable to look around,
+     fall back to drag-to-look, which needs no permission at all. */
+  let dragging = false, dragX = 0, dragY = 0;
+
   function requestLock() {
     const el = document.getElementById('hit');
-    if (el && el.requestPointerLock) el.requestPointerLock();
+    if (el && el.requestPointerLock) {
+      const r = el.requestPointerLock();
+      if (r && r.catch) r.catch(() => { /* fallback path handles it */ });
+    }
+    const plate = document.getElementById('plate');
+    if (plate) plate.classList.add('gone');
     VB.start();
+  }
+
+  function onDown(e) {
+    requestLock();
+    dragging = true; dragX = e.clientX; dragY = e.clientY;
+  }
+  function onDrag(e) {
+    if (!dragging || locked) return;      // pointer lock, when we have it, wins
+    const sens = 0.0034;
+    wantYaw -= (e.clientX - dragX) * sens;
+    wantPitch -= (e.clientY - dragY) * sens;
+    wantPitch = VB.clamp(wantPitch, -1.15, 1.15);
+    dragX = e.clientX; dragY = e.clientY;
   }
 
   return {
     init() {
       const hit = document.getElementById('hit');
-      hit.addEventListener('mousedown', requestLock);
+      hit.addEventListener('mousedown', onDown);
+      window.addEventListener('mouseup', () => { dragging = false; });
+      window.addEventListener('mousemove', onDrag);
       document.addEventListener('pointerlockchange', () => {
         locked = document.pointerLockElement === document.getElementById('hit');
       });

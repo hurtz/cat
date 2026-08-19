@@ -2,3 +2,7 @@ node_modules/
 vendor/
 shots/
 drop/
+
+# derived build outputs — regenerate with `node build.mjs --inline` / `--artifact`
+play.html
+artifact.html

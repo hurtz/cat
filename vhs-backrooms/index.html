@@ -11,11 +11,29 @@
   #hit{position:absolute;inset:0;cursor:none;background:transparent}
   #warn{position:absolute;left:0;right:0;bottom:6px;text-align:center;color:#5a5a5a;
     font:11px/1.5 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.14em;pointer-events:none}
+  /* The start plate is the paused VCR, not a game menu. */
+  #plate{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:22px;background:#000;color:#c8c2a4;text-align:center;
+    font:14px/2 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.26em;
+    pointer-events:none;transition:opacity .5s ease;z-index:5}
+  #plate.gone{opacity:0}
+  #plate b{font-size:19px;letter-spacing:.42em;color:#e6dfbe;font-weight:600}
+  #plate s{text-decoration:none;color:#6f6a54;font-size:11px;letter-spacing:.2em}
+  #plate i{font-style:normal;color:#8a8a72}
+  @keyframes pl{0%,44%{opacity:.15}50%,100%{opacity:1}}
+  #plate u{text-decoration:none;animation:pl 1.6s steps(1,end) infinite}
 </style>
 </head>
 <body>
 <canvas id="screen"></canvas>
 <div id="hit"></div>
+<div id="plate">
+  <b>SUNSET TERRACE</b>
+  <s>PROPERTY OF FACILITIES MGMT &nbsp;&middot;&nbsp; TAPE 04 &nbsp;&middot;&nbsp; DO NOT ERASE</s>
+  <u>&#9654; CLICK TO PLAY</u>
+  <s>WASD MOVE &nbsp;&middot;&nbsp; MOUSE LOOK &nbsp;&middot;&nbsp; SHIFT RUN &nbsp;&middot;&nbsp; E INTERACT</s>
+  <s>headphones recommended</s>
+</div>
 <div id="warn"></div>
 <script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js"}}</script>
 <script type="module">
@@ -2326,16 +2344,41 @@ VB.def('player', function (VB, THREE) {
     VB.emit('player:interact', { hit: isFinite(d) ? d : null, pos: S.pos.clone(), dir: fwd.clone() });
   }
 
+  /* Pointer lock is not always available — an embedded/sandboxed frame can
+     refuse it outright. Rather than leaving the player unable to look around,
+     fall back to drag-to-look, which needs no permission at all. */
+  let dragging = false, dragX = 0, dragY = 0;
+
   function requestLock() {
     const el = document.getElementById('hit');
-    if (el && el.requestPointerLock) el.requestPointerLock();
+    if (el && el.requestPointerLock) {
+      const r = el.requestPointerLock();
+      if (r && r.catch) r.catch(() => { /* fallback path handles it */ });
+    }
+    const plate = document.getElementById('plate');
+    if (plate) plate.classList.add('gone');
     VB.start();
+  }
+
+  function onDown(e) {
+    requestLock();
+    dragging = true; dragX = e.clientX; dragY = e.clientY;
+  }
+  function onDrag(e) {
+    if (!dragging || locked) return;      // pointer lock, when we have it, wins
+    const sens = 0.0034;
+    wantYaw -= (e.clientX - dragX) * sens;
+    wantPitch -= (e.clientY - dragY) * sens;
+    wantPitch = VB.clamp(wantPitch, -1.15, 1.15);
+    dragX = e.clientX; dragY = e.clientY;
   }
 
   return {
     init() {
       const hit = document.getElementById('hit');
-      hit.addEventListener('mousedown', requestLock);
+      hit.addEventListener('mousedown', onDown);
+      window.addEventListener('mouseup', () => { dragging = false; });
+      window.addEventListener('mousemove', onDrag);
       document.addEventListener('pointerlockchange', () => {
         locked = document.pointerLockElement === document.getElementById('hit');
       });
