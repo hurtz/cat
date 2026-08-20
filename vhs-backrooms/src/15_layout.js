@@ -1,20 +1,40 @@
 /* ============================================================================
-   LAYOUT — endless procedural office. Chunk-streamed, fully deterministic from
-   (seed, chunk coords), so walking a circle brings you back to the same room
-   and there is nothing to "remember".
+   LAYOUT — endless procedural office.
 
-   Solidity is decided per world cell. Rooms come from a per-chunk BSP; chunk
-   seams are decided by a hash of the shared edge so both sides agree.
+   Fully deterministic from (seed, world cell): walk a circle and the same rooms
+   come back, so there is nothing to remember and nothing to persist.
+
+   Three things carry this module:
+
+   * NEIGHBOURHOODS. A per-chunk BSP alone gives every part of the world the
+     same statistics, and the eye finds that rhythm within a minute. A coarse
+     spatial hash instead selects a *kind* of place — a cubicle warren, an open
+     pillar hall, a service corridor run, a dead-end cluster — held across
+     several chunks, so the world changes character as you walk rather than
+     repeating at a nameable period. The BSP origin is also jittered per chunk
+     so its cuts do not land on the chunk lattice.
+
+   * DOORWAYS ARE OPENINGS, NOT GAPS. A hole punched from floor to ceiling
+     reads as a missing wall. A real partition has a header above the opening
+     and jambs at its sides, and putting those back is the single largest gain
+     in how architectural the space feels. Door cells are their own cell kind:
+     solid above DOOR_H, open below, walkable, and transparent to the entity's
+     line of sight because the entity's eyes are below the header.
+
+   * CELL KINDS. 0 open, 1 wall, 2 pillar (narrower), 3 doorway (header only).
+     Collision and raycasting both have to agree with the mesh about these or
+     the player walks through walls that are visibly there.
    ========================================================================== */
 VB.def('layout', function (VB, THREE) {
   const S = VB.S;
 
   const CELL = 2.6;          // metres per grid cell
   const CEIL = 2.72;         // ceiling height
+  const DOOR_H = 2.04;       // underside of the door header
   const CH = 8;              // cells per chunk edge
   const RADIUS = 2;          // chunks streamed around the player
 
-  const chunks = new Map();  // "cx,cz" -> {group, solids:Uint8Array, fixtures:[]}
+  const chunks = new Map();
   const solidCache = new Map();
   const fixtures = [];
   let lastCell = null, lastRoomId = -1;
@@ -22,68 +42,114 @@ VB.def('layout', function (VB, THREE) {
   const key = (a, b) => a + ',' + b;
   const floorDiv = (a, b) => Math.floor(a / b);
 
+  /* ----------------------------------------------------------- neighbourhood
+     Held over a 4x4-chunk area (~83m) so a place has time to establish itself.
+     The boundaries are hashed rather than gridded in appearance because the
+     generators blend at the edges — a warren next to a hall simply has its
+     outermost rooms open into the hall. */
+  const HOODS = ['warren', 'hall', 'corridor', 'cluster'];
+  function hoodAt(gx, gz) {
+    const h = VB.hashf(floorDiv(gx, 4), floorDiv(gz, 4), 60013);
+    /* halls are rarer than rooms — a building is mostly rooms, and the open
+       spaces have to feel like a change */
+    return h < 0.40 ? 'warren' : h < 0.62 ? 'cluster' : h < 0.84 ? 'corridor' : 'hall';
+  }
+
   /* ------------------------------------------------------- chunk solidity */
-  /* Returns Uint8Array(CH*CH): 1 = solid. Cached. */
   function chunkSolids(gx, gz) {
     const k = key(gx, gz);
     let s = solidCache.get(k);
     if (s) return s;
     s = new Uint8Array(CH * CH);
     const R = VB.rngFrom(VB.hash2(gx, gz, S.seed));
+    const hood = hoodAt(gx, gz);
 
-    /* BSP: split the chunk into rooms with 1-cell walls and cut doorways. */
+    /* Wall runs, collected first so doorways can be cut into them afterwards
+       with knowledge of the whole run. */
     const walls = [];
-    (function split(x0, z0, x1, z1, depth) {
-      const w = x1 - x0, h = z1 - z0;
-      if (depth > 3 || (w < 4 && h < 4) || R() < 0.11) return;
-      const vertical = w === h ? R() < 0.5 : w > h;
-      if (vertical) {
-        if (w < 4) return;
-        const cut = x0 + 1 + Math.floor(R() * (w - 2));
-        walls.push({ v: 1, at: cut, a: z0, b: z1 });
-        split(x0, z0, cut, z1, depth + 1);
-        split(cut + 1, z0, x1, z1, depth + 1);
-      } else {
-        if (h < 4) return;
-        const cut = z0 + 1 + Math.floor(R() * (h - 2));
-        walls.push({ v: 0, at: cut, a: x0, b: x1 });
-        split(x0, z0, x1, cut, depth + 1);
-        split(x0, cut + 1, x1, z1, depth + 1);
-      }
-    })(0, 0, CH, CH, 0);
+    const pushWall = (v, at, a, b) => { if (b - a >= 2) walls.push({ v, at, a, b }); };
 
+    if (hood === 'hall') {
+      /* Big open volume. One or two stub walls so it is not a featureless box. */
+      if (R() < 0.55) pushWall(1, 1 + Math.floor(R() * (CH - 2)), 0, 2 + Math.floor(R() * 3));
+      if (R() < 0.55) pushWall(0, 1 + Math.floor(R() * (CH - 2)), CH - 3 - Math.floor(R() * 2), CH);
+    } else if (hood === 'corridor') {
+      /* Parallel service runs. The gap between them is deliberately one cell:
+         2.6m minus wall thickness reads as slightly too narrow to be a real
+         corridor, which is the point. */
+      const vertical = VB.hashf(gx, gz, 7717) < 0.5;
+      let at = Math.floor(R() * 3);
+      while (at < CH) {
+        pushWall(vertical ? 1 : 0, at, 0, CH);
+        at += 2 + (R() < 0.3 ? 1 : 0);
+      }
+    } else {
+      /* warren / cluster — BSP, with the origin jittered off the chunk lattice
+         so successive chunks do not cut in the same places. */
+      const maxDepth = hood === 'warren' ? 4 : 3;
+      const jx = Math.floor(R() * 3) - 1, jz = Math.floor(R() * 3) - 1;
+      (function split(x0, z0, x1, z1, depth) {
+        const w = x1 - x0, h = z1 - z0;
+        if (depth > maxDepth || (w < 4 && h < 4) || R() < 0.10) return;
+        const vertical = w === h ? R() < 0.5 : w > h;
+        if (vertical) {
+          if (w < 4) return;
+          const cut = x0 + 1 + Math.floor(R() * (w - 2));
+          pushWall(1, cut, z0, z1);
+          split(x0, z0, cut, z1, depth + 1);
+          split(cut + 1, z0, x1, z1, depth + 1);
+        } else {
+          if (h < 4) return;
+          const cut = z0 + 1 + Math.floor(R() * (h - 2));
+          pushWall(0, cut, x0, x1);
+          split(x0, z0, x1, cut, depth + 1);
+          split(x0, cut + 1, x1, z1, depth + 1);
+        }
+      })(jx, jz, CH + jx, CH + jz, 0);
+    }
+
+    /* Lay the runs down, cutting doorways rather than gaps. */
     for (const w of walls) {
       const len = w.b - w.a;
-      /* one or two doorways per wall run */
       const doors = [w.a + 1 + Math.floor(R() * Math.max(1, len - 2))];
-      if (len > 5 && R() < 0.45) doors.push(w.a + 1 + Math.floor(R() * Math.max(1, len - 2)));
+      if (len > 5 && R() < 0.5) doors.push(w.a + 1 + Math.floor(R() * Math.max(1, len - 2)));
+      /* Occasionally a run has NO door. A corridor that ends in a wall for no
+         reason is one of the few genuinely unsettling things a floor plan can
+         do, so it is rare and never explained. */
+      const sealed = R() < 0.06;
       for (let i = w.a; i < w.b; i++) {
-        if (doors.indexOf(i) >= 0) continue;
         const x = w.v ? w.at : i, z = w.v ? i : w.at;
-        if (x >= 0 && x < CH && z >= 0 && z < CH) s[z * CH + x] = 1;
+        if (x < 0 || x >= CH || z < 0 || z >= CH) continue;
+        s[z * CH + x] = (!sealed && doors.indexOf(i) >= 0) ? 3 : 1;
       }
     }
 
-    /* Seam walls: both neighbouring chunks derive these from the same hash, so
-       they always agree and rooms read as continuous across the boundary. */
+    /* Seam walls — both neighbouring chunks derive these from the same hash of
+       the shared edge, so they always agree and rooms read as continuous. */
     for (let i = 0; i < CH; i++) {
-      if (VB.hashf(gx, gz * CH + i, 8081) < 0.30 && VB.hashf(gx, gz * CH + i, 91) > 0.16) s[i * CH + 0] = 1;
-      if (VB.hashf(gx * CH + i, gz, 4405) < 0.30 && VB.hashf(gx * CH + i, gz, 77) > 0.16) s[0 * CH + i] = 1;
+      const he = VB.hashf(gx, gz * CH + i, 8081);
+      if (he < 0.26 && he > 0.14) s[i * CH + 0] = (he < 0.165) ? 3 : 1;
+      const hn = VB.hashf(gx * CH + i, gz, 4405);
+      if (hn < 0.26 && hn > 0.14) s[0 * CH + i] = (hn < 0.165) ? 3 : 1;
     }
 
-    /* Pillars in the wide-open parts — the load-bearing grid that no office
-       this shape would ever actually need. */
+    /* Pillars. In halls they are a grid; elsewhere they are occasional. The
+       grid is deliberately NOT aligned to the walls around it — a real building
+       would never do that, and noticing it is the whole effect. */
+    const pitch = hood === 'hall' ? 3 : 4;
+    const off = hood === 'hall' ? 1 : 2;
     for (let z = 1; z < CH - 1; z++) {
       for (let x = 1; x < CH - 1; x++) {
         const wx = gx * CH + x, wz = gz * CH + z;
-        if (((wx % 4) + 4) % 4 === 2 && ((wz % 4) + 4) % 4 === 2 && VB.hashf(wx, wz, 5150) < 0.5) {
-          let open = true;
-          for (let d = 0; d < 4; d++) {
-            const nx = x + (d === 0 ? 1 : d === 1 ? -1 : 0), nz = z + (d === 2 ? 1 : d === 3 ? -1 : 0);
-            if (s[nz * CH + nx]) { open = false; break; }
-          }
-          if (open) s[z * CH + x] = 2;   // 2 = pillar (solid, but narrower)
+        if (((wx % pitch) + pitch) % pitch !== off || ((wz % pitch) + pitch) % pitch !== off) continue;
+        if (s[z * CH + x]) continue;
+        if (hood !== 'hall' && VB.hashf(wx, wz, 5150) > 0.45) continue;
+        let clear = true;
+        for (let d = 0; d < 4; d++) {
+          const nx = x + (d === 0 ? 1 : d === 1 ? -1 : 0), nz = z + (d === 2 ? 1 : d === 3 ? -1 : 0);
+          if (s[nz * CH + nx]) { clear = false; break; }
         }
+        if (clear) s[z * CH + x] = 2;
       }
     }
 
@@ -92,12 +158,16 @@ VB.def('layout', function (VB, THREE) {
     return s;
   }
 
-  function solidAtCell(wx, wz) {
+  function cellKind(wx, wz) {
     const gx = floorDiv(wx, CH), gz = floorDiv(wz, CH);
     const s = chunkSolids(gx, gz);
     return s[(wz - gz * CH) * CH + (wx - gx * CH)];
   }
-  function solidAt(x, z) { return solidAtCell(Math.floor(x / CELL), Math.floor(z / CELL)) > 0; }
+  /* Blocking for movement: walls and pillars, never doorways. */
+  function solidAt(x, z) {
+    const k = cellKind(Math.floor(x / CELL), Math.floor(z / CELL));
+    return k === 1 || k === 2;
+  }
 
   /* -------------------------------------------------------------- meshing */
   function buildChunk(gx, gz) {
@@ -105,9 +175,8 @@ VB.def('layout', function (VB, THREE) {
     const ox = gx * CH * CELL, oz = gz * CH * CELL;
     const group = new THREE.Group();
     const localFixtures = [];
-
-    /* floor + ceiling planes for the whole chunk */
     const span = CH * CELL;
+
     const fg = new THREE.PlaneGeometry(span, span);
     fg.rotateX(-Math.PI / 2);
     const floor = new THREE.Mesh(fg, VB.mats.carpet);
@@ -116,15 +185,13 @@ VB.def('layout', function (VB, THREE) {
     cg.rotateX(Math.PI / 2);
     const ceil = new THREE.Mesh(cg, VB.mats.ceiling);
     ceil.position.set(ox + span / 2, CEIL, oz + span / 2);
-    /* uv tiling: carpet repeats per 2 cells, ceiling texture holds 2x2 tiles */
-    for (const [m, rep] of [[floor, CH / 2], [ceil, CH / 2]]) {
-      const uv = m.geometry.attributes.uv;
+    for (const m of [floor, ceil]) {
+      const uv = m.geometry.attributes.uv, rep = CH / 2;
       for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * rep, uv.getY(i) * rep);
       uv.needsUpdate = true;
     }
     group.add(floor, ceil);
 
-    /* wall faces — emit only the faces that border an open cell */
     const pos = [], nor = [], uvs = [], idx = [];
     let vi = 0;
     function quad(ax, ay, az, bx, by, bz, cx2, cy2, cz2, dx, dy, dz, nx, ny, nz, u0, v0, u1, v1) {
@@ -135,25 +202,40 @@ VB.def('layout', function (VB, THREE) {
       vi += 4;
     }
     const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
     for (let z = 0; z < CH; z++) {
       for (let x = 0; x < CH; x++) {
         const kind = s[z * CH + x];
         if (!kind) continue;
-        const inset = kind === 2 ? 0.62 : 0;          // pillars are narrower
+        const inset = kind === 2 ? 0.62 : 0;
         const x0 = ox + x * CELL + inset * CELL * 0.5, x1 = ox + (x + 1) * CELL - inset * CELL * 0.5;
         const z0 = oz + z * CELL + inset * CELL * 0.5, z1 = oz + (z + 1) * CELL - inset * CELL * 0.5;
-        const h = CEIL;
+        /* A doorway is only the header — the wall above the opening. */
+        const yLo = kind === 3 ? DOOR_H : 0, yHi = CEIL;
+
         for (let d = 0; d < 4; d++) {
           const nx = x + DIRS[d][0], nz = z + DIRS[d][1];
-          const nSolid = (nx >= 0 && nx < CH && nz >= 0 && nz < CH)
-            ? s[nz * CH + nx] : solidAtCell(gx * CH + nx, gz * CH + nz);
-          if (nSolid && kind !== 2) continue;                 // interior face, skip
+          const nKind = (nx >= 0 && nx < CH && nz >= 0 && nz < CH)
+            ? s[nz * CH + nx] : cellKind(gx * CH + nx, gz * CH + nz);
+          /* Skip the face only where a same-height neighbour hides it. A door
+             beside a wall still needs its face drawn above the header. */
+          if (kind !== 2 && nKind === 1) continue;
+          if (kind === 3 && nKind === 3) continue;
+
           const uw = (d < 2 ? (z1 - z0) : (x1 - x0)) / CELL;
           const u0 = (d < 2 ? z0 : x0) / CELL;
-          if (d === 0) quad(x1, 0, z1, x1, 0, z0, x1, h, z0, x1, h, z1, 1, 0, 0, u0, 0, u0 + uw, 1);
-          else if (d === 1) quad(x0, 0, z0, x0, 0, z1, x0, h, z1, x0, h, z0, -1, 0, 0, u0, 0, u0 + uw, 1);
-          else if (d === 2) quad(x0, 0, z1, x1, 0, z1, x1, h, z1, x0, h, z1, 0, 0, 1, u0, 0, u0 + uw, 1);
-          else quad(x1, 0, z0, x0, 0, z0, x0, h, z0, x1, h, z0, 0, 0, -1, u0, 0, u0 + uw, 1);
+          const v0 = yLo / CEIL, v1 = yHi / CEIL;
+          if (d === 0) quad(x1, yLo, z1, x1, yLo, z0, x1, yHi, z0, x1, yHi, z1, 1, 0, 0, u0, v0, u0 + uw, v1);
+          else if (d === 1) quad(x0, yLo, z0, x0, yLo, z1, x0, yHi, z1, x0, yHi, z0, -1, 0, 0, u0, v0, u0 + uw, v1);
+          else if (d === 2) quad(x0, yLo, z1, x1, yLo, z1, x1, yHi, z1, x0, yHi, z1, 0, 0, 1, u0, v0, u0 + uw, v1);
+          else quad(x1, yLo, z0, x0, yLo, z0, x0, yHi, z0, x1, yHi, z0, 0, 0, -1, u0, v0, u0 + uw, v1);
+        }
+
+        /* The underside of the header, so a doorway reads as having thickness
+           rather than being a decal on a plane. */
+        if (kind === 3) {
+          quad(x0, DOOR_H, z0, x1, DOOR_H, z0, x1, DOOR_H, z1, x0, DOOR_H, z1,
+            0, -1, 0, x0 / CELL, z0 / CELL, x1 / CELL, z1 / CELL);
         }
       }
     }
@@ -167,17 +249,18 @@ VB.def('layout', function (VB, THREE) {
       group.add(new THREE.Mesh(g, VB.mats.variant('wall', VB.hash2(gx, gz, 3) & 1)));
     }
 
-    /* light troffers, on a grid, mostly in open cells, some dead */
+    /* Troffers, on the ceiling grid, some dead. */
     const panelGeo = new THREE.PlaneGeometry(1.16, 0.58);
     panelGeo.rotateX(Math.PI / 2);
     for (let z = 0; z < CH; z++) {
       for (let x = 0; x < CH; x++) {
         const wx = gx * CH + x, wz = gz * CH + z;
         if (((wx % 3) + 3) % 3 !== 1 || ((wz % 3) + 3) % 3 !== 1) continue;
-        if (s[z * CH + x]) continue;
+        if (s[z * CH + x] === 1 || s[z * CH + x] === 2) continue;
         const px = ox + (x + 0.5) * CELL, pz = oz + (z + 0.5) * CELL;
         const dead = VB.hashf(wx, wz, 616) < 0.10;
         const m = new THREE.Mesh(panelGeo, VB.mats.lightPanel.clone());
+        m.material._isClone = true;
         m.position.set(px, CEIL - 0.012, pz);
         m.material.color.setHex(dead ? 0x2a2a24 : 0xfff2cc);
         group.add(m);
@@ -208,7 +291,7 @@ VB.def('layout', function (VB, THREE) {
     for (let dz = -RADIUS; dz <= RADIUS; dz++) {
       for (let dx = -RADIUS; dx <= RADIUS; dx++) {
         const k = key(gx + dx, gz + dz);
-        if (!chunks.has(k)) { buildChunk(gx + dx, gz + dz); return; }  // one per frame
+        if (!chunks.has(k)) { buildChunk(gx + dx, gz + dz); return; }
       }
     }
     for (const k of chunks.keys()) {
@@ -224,7 +307,6 @@ VB.def('layout', function (VB, THREE) {
   }
 
   /* ------------------------------------------------------------ collision */
-  const _v = new THREE.Vector3();
   function collide(p, r) {
     for (let axis = 0; axis < 2; axis++) {
       const c = axis === 0 ? p.x : p.z;
@@ -234,8 +316,8 @@ VB.def('layout', function (VB, THREE) {
         for (let e = -1; e <= 1; e++) {
           const cx = axis === 0 ? ci + d : oi + e;
           const cz = axis === 0 ? oi + e : ci + d;
-          const kind = solidAtCell(cx, cz);
-          if (!kind) continue;
+          const kind = cellKind(cx, cz);
+          if (kind !== 1 && kind !== 2) continue;      // doorways are walkable
           const inset = kind === 2 ? 0.62 * CELL * 0.5 : 0;
           const minX = cx * CELL + inset, maxX = (cx + 1) * CELL - inset;
           const minZ = cz * CELL + inset, maxZ = (cz + 1) * CELL - inset;
@@ -255,7 +337,9 @@ VB.def('layout', function (VB, THREE) {
     }
   }
 
-  /* --------------------------------------------------------- grid raycast */
+  /* Line of sight at eye height. Door headers sit above the eye, so a doorway
+     does not block sight — which is exactly how you glimpse something through
+     one two rooms away. */
   function raycastWalls(origin, dir, maxD) {
     let x = origin.x, z = origin.z;
     const step = 0.12;
@@ -275,15 +359,15 @@ VB.def('layout', function (VB, THREE) {
     return null;
   }
 
-  /* Open on a view, never nose-first into a wall: take the roomiest cell near
-     the origin and face it down its longest clear run. */
+  /* Open on a view rather than nose-first into a wall. */
   function spawn() {
     let best = null;
     for (let z = -6; z <= 6; z++) {
       for (let x = -6; x <= 6; x++) {
-        if (solidAtCell(x, z)) continue;
+        if (solidAt((x + 0.5) * CELL, (z + 0.5) * CELL)) continue;
         let open = 0;
-        for (let b = -2; b <= 2; b++) for (let a = -2; a <= 2; a++) if (!solidAtCell(x + a, z + b)) open++;
+        for (let b = -2; b <= 2; b++) for (let a = -2; a <= 2; a++)
+          if (!solidAt((x + a + 0.5) * CELL, (z + b + 0.5) * CELL)) open++;
         const score = open - Math.hypot(x, z) * 0.35;
         if (!best || score > best.score) best = { x, z, score };
       }
@@ -309,11 +393,12 @@ VB.def('layout', function (VB, THREE) {
   return {
     init() {
       VB.layout = {
-        CELL, CEIL, CH,
+        CELL, CEIL, CH, DOOR_H,
         solidAt, collide, raycastWalls, randomOpenPointNear,
         floorY: () => 0,
         ceilY: () => CEIL,
-        roomKindAt: (x, z) => 'office',
+        roomKindAt: (x, z) => hoodAt(floorDiv(Math.floor(x / CELL), CH), floorDiv(Math.floor(z / CELL), CH)),
+        cellKind,
         fixtures,
         chunkCount: () => chunks.size,
       };
@@ -328,12 +413,16 @@ VB.def('layout', function (VB, THREE) {
       if (!lastCell || lastCell.cx !== cx || lastCell.cz !== cz) {
         lastCell = { cx, cz };
         S.cell = lastCell;
-        /* "room" identity = flood region id approximated by a coarse hash */
         const rid = VB.hash2(floorDiv(cx, 3), floorDiv(cz, 3), 9);
         if (rid !== lastRoomId) {
           lastRoomId = rid;
-          S.anomaly = VB.hashf(cx, cz, 1234) * 0.6;
-          VB.emit('room:enter', { cx, cz, kind: 'office' });
+          /* How wrong this place is. Corridors that are too narrow and halls
+             whose pillars ignore their walls score high; ordinary rooms score
+             near zero, because the horror only works if most of it is mundane. */
+          const hood = hoodAt(floorDiv(cx, CH), floorDiv(cz, CH));
+          const base = hood === 'corridor' ? 0.55 : hood === 'hall' ? 0.35 : 0.12;
+          S.anomaly = VB.clamp(base + VB.hashf(cx, cz, 1234) * 0.35, 0, 1);
+          VB.emit('room:enter', { cx, cz, kind: hood });
         }
       }
     },
