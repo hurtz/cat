@@ -44,7 +44,7 @@ const html = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
-<title>SUNSET TERRACE — TAPE 04</title>
+<title>CLAUDEROOMS — TAPE 04</title>
 <style>
   html,body{margin:0;padding:0;height:100%;background:#000;overflow:hidden;
     -webkit-user-select:none;user-select:none;touch-action:none}
@@ -69,7 +69,7 @@ const html = `<!doctype html>
 <canvas id="screen"></canvas>
 <div id="hit"></div>
 <div id="plate">
-  <b>SUNSET TERRACE</b>
+  <b>CLAUDEROOMS</b>
   <s>PROPERTY OF FACILITIES MGMT &nbsp;&middot;&nbsp; TAPE 04 &nbsp;&middot;&nbsp; DO NOT ERASE</s>
   <u>&#9654; CLICK TO PLAY</u>
   <s id="ctl">WASD MOVE &nbsp;&middot;&nbsp; MOUSE LOOK &nbsp;&middot;&nbsp; SHIFT RUN &nbsp;&middot;&nbsp; E INTERACT</s>
@@ -93,7 +93,7 @@ if (ARTIFACT) {
   outHtml = html
     /* Gallery title is the name alone — the "— TAPE 04" suffix is an
        explainer, and that belongs in the publish description. */
-    .replace(/^[\s\S]*?<title>[^<]*<\/title>/, '<title>Sunset Terrace</title>')
+    .replace(/^[\s\S]*?<title>[^<]*<\/title>/, '<title>Clauderooms</title>')
     .replace(/<\/head>\s*<body>/, '')
     .replace(/<\/body>\s*<\/html>\s*$/, '');
 }
